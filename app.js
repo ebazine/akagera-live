@@ -100,11 +100,12 @@ function buildData(){
   L.water=useOsmWater?pathOf(O.water.flatMap(w=>w.g),true):null;
   L.shore=useOsmWater?null:pathOf(B.shore,false);
   L.rivers=O&&O.rivers?pathOf(O.rivers.map(r=>r.g),false):null;
-  const groups={major:[],minor:[],track:[]};
+  const groups={major:[],minor:[],track:[],closed:[]};
   if(O&&O.ways&&O.ways.length>20){
-    for(const w of O.ways){const g=MAJOR.has(w.h)?'major':MINOR.has(w.h)?'minor':'track';groups[g].push(w.n.map(i=>[O.nodes[2*i],O.nodes[2*i+1]]));}
+    for(const w of O.ways){const g=w.a?'closed':MAJOR.has(w.h)?'major':MINOR.has(w.h)?'minor':'track';groups[g].push(w.n.map(i=>[O.nodes[2*i],O.nodes[2*i+1]]));}
   } else groups.track=B.roads;
   L.major=pathOf(groups.major,false);L.minor=pathOf(groups.minor,false);L.track=pathOf(groups.track,false);
+  L.closed=groups.closed.length?pathOf(groups.closed,false):null;
   L.osm=!!(O&&O.ways&&O.ways.length>20);
   // water labels from OSM
   S.waterNames=[];
@@ -138,16 +139,59 @@ function buildData(){
     }
   }
   S.juncs=S.pois.filter(p=>p.cat==='junction').sort((a,b)=>a.num-b.num);
+  S.links=[];L.approx=null;
+  if(L.osm){const ix=osmIndex(O);placeJunctions(ix);boardLinks(ix);}
   S.named=S.pois.filter(p=>['lake','area','gate','lodge','camp','lookout','picnic','reception','hill'].includes(p.cat));
   for(const w of S.waterNames){if(!S.named.some(n=>n.cat==='lake'&&n.name===w.name))S.named.push({name:w.name,short:w.name,cat:'lake',x:w.x,y:w.y});}
   buildGraph();
 }
 
+/* spatial index over OpenStreetMap road segments: nearest point on a road */
+function osmIndex(O){
+  const C=500,grid=new Map(),X=[],Y=[],segs=[];const n=O.nodes.length/2;
+  for(let i=0;i<n;i++){const q=merc(O.nodes[2*i],O.nodes[2*i+1]);X.push(q[0]);Y.push(q[1]);}
+  for(const w of O.ways)for(let k=0;k+1<w.n.length;k++){const a=w.n[k],b=w.n[k+1];const si=segs.length;segs.push([a,b,w.a?1:0]);
+    const x0=Math.floor(Math.min(X[a],X[b])/C),x1=Math.floor(Math.max(X[a],X[b])/C),y0=Math.floor(Math.min(Y[a],Y[b])/C),y1=Math.floor(Math.max(Y[a],Y[b])/C);
+    for(let gx=x0;gx<=x1;gx++)for(let gy=y0;gy<=y1;gy++){const key=gx+','+gy;let l=grid.get(key);if(!l)grid.set(key,l=[]);l.push(si);}}
+  // any=true also counts tracks closed to visitors
+  const near=(x,y,r,any)=>{let best=null;const cr=Math.ceil(r/KG/C),cx=Math.floor(x/C),cy=Math.floor(y/C),seen=new Set();
+    for(let gx=cx-cr;gx<=cx+cr;gx++)for(let gy=cy-cr;gy<=cy+cr;gy++){const l=grid.get(gx+','+gy);if(!l)continue;
+      for(const si of l){if(seen.has(si))continue;seen.add(si);const s=segs[si];if(s[2]&&!any)continue;const p=projSeg(x,y,X[s[0]],Y[s[0]],X[s[1]],Y[s[1]]);if(p.d<=r&&(!best||p.d<best.d))best={d:p.d,x:p.qx,y:p.qy};}}
+    return best;};
+  return {near};
+}
+/* junction stones known only from the park board sit on a road: move them onto the nearest one within 400 m */
+function placeJunctions(ix){
+  for(const j of S.juncs){if(j.src!=='board')continue;const p=ix.near(j.x,j.y,400);if(!p)continue;
+    const g=unmerc(p.x,p.y);Object.assign(j,{x:p.x,y:p.y,lat:g.lat,lon:g.lon,src:'snap'});}
+}
+/* tracks on the park board that OpenStreetMap does not have yet, drawn junction stone to junction stone.
+   A track is dropped automatically once OpenStreetMap maps it (open or closed). */
+function boardLinks(ix){
+  const lines=[];
+  for(const k of (S.board.links||[])){
+    const A=S.juncs.find(j=>j.num===k.a),B=S.juncs.find(j=>j.num===k.b);if(!A||!B)continue;
+    const pts=[[A.x,A.y],...(k.via||[]).map(c=>merc(c[0],c[1])),[B.x,B.y]];
+    let n=0,hit=0;
+    for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i];const m=Math.max(1,Math.round(gd(a[0],a[1],b[0],b[1])/60));
+      for(let t=1;t<m;t++){n++;if(ix.near(a[0]+(b[0]-a[0])*t/m,a[1]+(b[1]-a[1])*t/m,120,true))hit++;}}
+    if(n&&hit/n>0.6)continue;
+    S.links.push({a:k.a,b:k.b,pts,nm:`Track ${k.a}–${k.b}`});A.link=B.link=true;lines.push(pts);
+  }
+  if(lines.length){const p=new Path2D();for(const l of lines)l.forEach((q,i)=>i?p.lineTo(q[0],q[1]):p.moveTo(q[0],q[1]));S.layers.approx=p;}
+}
 function buildGraph(){
   const O=S.osm; let X=[],Y=[],ways=[];
   if(O&&O.ways&&O.ways.length>20){
     const n=O.nodes.length/2;for(let i=0;i<n;i++){const q=merc(O.nodes[2*i],O.nodes[2*i+1]);X.push(q[0]);Y.push(q[1]);}
-    ways=O.ways.map(w=>({n:w.n,h:w.h,nm:w.nm||'',t:w.t,s:w.s,o:w.o==='yes'}));
+    ways=O.ways.map(w=>({n:w.n,h:w.h,nm:w.nm||'',t:w.t,s:w.s,o:w.o==='yes',a:!!w.a}));
+    // board-only tracks: one shared node per junction stone, joined to the nearest open road node within 350 m
+    const jn=new Map();const jnode=(num,q)=>{let v=jn.get(num);if(v==null){v=X.length;X.push(q[0]);Y.push(q[1]);jn.set(num,v);}return v;};
+    for(const k of S.links||[]){const ids=[jnode(k.a,k.pts[0])];for(let i=1;i<k.pts.length-1;i++){ids.push(X.length);X.push(k.pts[i][0]);Y.push(k.pts[i][1]);}ids.push(jnode(k.b,k.pts[k.pts.length-1]));
+      ways.push({n:ids,h:'track',t:'board',nm:k.nm,o:false,approx:true});}
+    if(jn.size){const open=new Uint8Array(n);for(const w of O.ways)if(!w.a)for(const i of w.n)open[i]=1;
+      for(const [,v] of jn){let best=-1,bd=350;for(let i=0;i<n;i++){if(!open[i])continue;const d=gd(X[i],Y[i],X[v],Y[v]);if(d<bd){bd=d;best=i;}}
+        if(best>=0)ways.push({n:[v,best],h:'track',t:'board',nm:'',o:false,approx:true});}}
   } else {
     const key=new Map();
     const id=c=>{const k=c[0].toFixed(5)+','+c[1].toFixed(5);let v=key.get(k);if(v==null){v=X.length;key.set(k,v);const q=merc(c[0],c[1]);X.push(q[0]);Y.push(q[1]);}return v;};
@@ -167,7 +211,9 @@ function buildGraph(){
     let sx=0,sy=0;for(const i of w.n){sx+=X[i];sy+=Y[i];}const inPark=inRing(sx/w.n.length,sy/w.n.length,S.park);
     let v={motorway:80,trunk:70,primary:60,secondary:50,tertiary:40,unclassified:30,residential:25,living_street:15,service:15,road:25,track:20}[w.h]||20;
     if(w.h==='track'){v={grade1:28,grade2:24,grade3:20,grade4:14,grade5:10}[w.t]||20;}
-    if(inPark){v=MAJOR.has(w.h)?35:w.h==='track'?Math.min(v,18):Math.min(v,28);if(w.h==='track'&&w.t==='grade1')v=25;} w.v=v/3.6; w.inPark=inPark;
+    if(inPark){v=MAJOR.has(w.h)?35:w.h==='track'?Math.min(v,18):Math.min(v,28);if(w.h==='track'&&w.t==='grade1')v=25;}
+    if(w.approx)v=15; w.v=v/3.6; w.inPark=inPark;
+    if(w.a)continue;   // closed to visitors: drawn, never routed
     for(let k=0;k+1<w.n.length;k++){const a=w.n[k],b=w.n[k+1];if(a===b||!inN[a]||!inN[b])continue;const len=gd(X[a],Y[a],X[b],Y[b]);const si=segs.length;segs.push([a,b,wi,len]);adj[a].push([b,si,wi]);if(!w.o)adj[b].push([a,si,wi]);}
   }
   const deg=new Uint8Array(N);for(let i=0;i<N;i++){deg[i]=new Set(adj[i].map(e=>e[0])).size;}
@@ -234,20 +280,25 @@ function route(fromX,fromY,toX,toY,destName,opt={}){
     for(const u of chain){pts.push([G.X[u],G.Y[u]]);nodes.push(u);}
   }
   pts.push([s1.qx,s1.qy]);
-  const r=buildRoute(pts,nodes,{pen,reasons},destName,best,[toX,toY]);r.startOff=s0.d;r.endOff=s1.d;r.start=[s0.qx,s0.qy];return r;
+  const r=buildRoute(pts,nodes,{pen,reasons},destName,best,[toX,toY]);r.startOff=s0.d;r.endOff=s1.d;r.start=[s0.qx,s0.qy];
+  // first and last pieces run along the snapped segments
+  const k=r.pts.length-1;
+  if(k>=1&&G.ways[segStart[2]].approx&&!r.approxSeg[1]){r.approxSeg[1]=1;r.approxLen+=r.cum[1];}
+  if(k>=1&&G.ways[segEnd[2]].approx&&!r.approxSeg[k]){r.approxSeg[k]=1;r.approxLen+=r.cum[k]-r.cum[k-1];}
+  return r;
 }
 /* several stops in a fixed order, joined into one route */
 function routeMulti(from,stops){
   const pp=penalties();const legs=[];let cx=from.x,cy=from.y;
   for(const st of stops){const r=route(cx,cy,st.x,st.y,st.name,{pp});if(r.error)return {...r,stop:st};legs.push(r);const e=r.pts[r.pts.length-1];cx=e[0];cy=e[1];}
   if(legs.length===1){legs[0].stops=[{...stops[0],d:legs[0].len}];return legs[0];}
-  const pts=[],cum=[],instr=[],warn=[],sights=[],via=[],wps=[];let off=0,time=0,ioff=0;
-  legs.forEach((L,k)=>{const skip=k?1:0;for(let i=skip;i<L.pts.length;i++){pts.push(L.pts[i]);cum.push(L.cum[i]+off);}
+  const pts=[],cum=[],instr=[],warn=[],sights=[],via=[],wps=[],aps=[];let off=0,time=0,ioff=0,approxLen=0;
+  legs.forEach((L,k)=>{const skip=k?1:0;for(let i=skip;i<L.pts.length;i++){pts.push(L.pts[i]);cum.push(L.cum[i]+off);aps.push(L.approxSeg?L.approxSeg[i]:0);}approxLen+=L.approxLen||0;
     for(const s of L.instr){const o={...s,i:s.i+ioff,d:s.d+off};if(s.type==='arrive'&&k<legs.length-1){o.type='waypoint';o.stop=k+1;o.name=stops[k].name;}if(s.type==='arrive'&&k===legs.length-1){o.stop=k+1;o.name=stops[k].name;}instr.push(o);}
     wps.push({...stops[k],d:L.len+off});
     for(const w of L.warn)if(!warn.includes(w))warn.push(w);for(const w of L.sights)if(!sights.includes(w))sights.push(w);for(const v of L.via)if(!via.includes(v))via.push(v);
     off+=L.len;time+=L.time;ioff=pts.length-1;});
-  return {pts,cum,len:off,time,tpm:time/Math.max(1,off),instr,warn,sights,via:via.slice(0,3),destName:stops[stops.length-1].name,dest:[stops[stops.length-1].x,stops[stops.length-1].y],stops:wps,startOff:legs[0].startOff,endOff:legs[legs.length-1].endOff,start:legs[0].start};
+  return {pts,cum,len:off,time,tpm:time/Math.max(1,off),instr,warn,sights,via:via.slice(0,3),destName:stops[stops.length-1].name,dest:[stops[stops.length-1].x,stops[stops.length-1].y],stops:wps,startOff:legs[0].startOff,endOff:legs[legs.length-1].endOff,start:legs[0].start,approxSeg:Uint8Array.from(aps),approxLen};
 }
 /* best visiting order for up to 6 stops (open path from the car) */
 function bestOrder(from,stops){
@@ -284,7 +335,7 @@ function buildRoute(pts,nodes,pp,destName,costS,dest){
     const wi=nextWay(u,nodeAt[i+1]);const nm=wi!=null?G.ways[wi].nm:'';
     instr.push({i,d:cum[i],type,road:nm});
   }
-  for(const s of instr){let bj=null,bd=90;for(const j of S.juncs){if(j.src!=='osm')continue;const d=gd(j.x,j.y,P[s.i][0],P[s.i][1]);if(d<bd){bd=d;bj=j;}}if(bj)s.j=bj.num;}
+  for(const s of instr){let bj=null,bd=90;for(const j of S.juncs){if(j.src!=='osm'&&j.src!=='snap'&&!j.link)continue;const d=gd(j.x,j.y,P[s.i][0],P[s.i][1]);if(d<bd){bd=d;bj=j;}}if(bj)s.j=bj.num;}
   instr.push({i:P.length-1,d:len,type:'arrive',road:''});
   // merge instructions closer than 25 m (keep the stronger)
   const out=[];for(const s of instr){const l=out[out.length-1];if(l&&s.d-l.d<20&&s.type!=='arrive'){continue;}out.push(s);}
@@ -293,7 +344,10 @@ function buildRoute(pts,nodes,pp,destName,costS,dest){
   for(const r of activeRoadReports()){const [x,y]=merc(r.lon,r.lat);let best=1e9;for(let i=1;i<P.length;i++){const p=projSeg(x,y,P[i-1][0],P[i-1][1],P[i][0],P[i][1]);if(p.d<best)best=p.d;}if(best<130&&!seen.has(r.id)){seen.add(r.id);warn.push(r);}}
   const sights=[];for(const r of visibleReports().filter(r=>r.kind==='animal')){const [x,y]=merc(r.lon,r.lat);let best=1e9;for(let i=1;i<P.length;i+=1){const p=projSeg(x,y,P[i-1][0],P[i-1][1],P[i][0],P[i][1]);if(p.d<best)best=p.d;}if(best<400)sights.push(r);}
   const via=[...new Set(out.map(s=>s.road).filter(Boolean))].slice(0,3);
-  return {pts:P,cum,len,tpm,time:costS,instr:out,warn,sights,via,destName,dest};
+  // which parts run on approximate board tracks
+  const approxSeg=new Uint8Array(P.length);let approxLen=0;
+  for(let i=1;i<P.length;i++){if(!(nodeAt[i-1]>=0))continue;const wi=nextWay(nodeAt[i-1],nodeAt[i]);if(wi!=null&&G.ways[wi].approx){approxSeg[i]=1;approxLen+=cum[i]-cum[i-1];}}
+  return {pts:P,cum,len,tpm,time:costS,instr:out,warn,sights,via,destName,dest,approxSeg,approxLen};
 }
 function nextWay(u,v){if(v==null||v<0)return null;for(const e of S.graph.adj[u])if(e[0]===v)return e[2];return null;}
 function instrText(s,withRoad=true){
@@ -618,6 +672,9 @@ function draw(){
   ctx.strokeStyle='#B5822C';ctx.lineWidth=(wMajor+2.4)*px;ctx.stroke(L.major);
   ctx.strokeStyle=S.set.sat?'#F5E7C8':'#FFFFFF';ctx.lineWidth=wTrack*px;ctx.stroke(L.track);ctx.lineWidth=wMinor*px;ctx.stroke(L.minor);
   ctx.strokeStyle='#F7C75A';ctx.lineWidth=wMajor*px;ctx.stroke(L.major);
+  if(L.closed){ctx.setLineDash([4*px,5*px]);ctx.strokeStyle=S.set.sat?'rgba(255,255,255,.55)':'#9C907C';ctx.lineWidth=Math.max(1.2,wTrack*.55)*px;ctx.stroke(L.closed);ctx.setLineDash([]);}
+  if(L.approx){ctx.strokeStyle=S.set.sat?'rgba(245,231,200,.55)':'rgba(255,255,255,.85)';ctx.lineWidth=(wTrack+1)*px;ctx.stroke(L.approx);
+    ctx.setLineDash([9*px,7*px]);ctx.strokeStyle='#8A5A2B';ctx.lineWidth=Math.max(1.6,wTrack*.75)*px;ctx.stroke(L.approx);ctx.setLineDash([]);}
   ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=6*px;ctx.stroke(L.park);ctx.strokeStyle='#22351F';ctx.lineWidth=2.6*px;ctx.stroke(L.park);
   // route
   const R=S.route;
@@ -920,7 +977,7 @@ function openReportView(r,silent){
 function openPoi(p){
   const rel=relTo(p.x,p.y);
   const kind={junction:'Junction stone',gate:'Park gate',reception:'Reception',hq:'Park office',lodge:'Lodge',camp:'Campsite',ranger:'Ranger post',fence:'Fence attendant house',picnic:'Picnic spot',lookout:'Lookout',fuel:'Fuel'}[p.cat]||'Place';
-  const nodes=[el('p',{class:'hint',text:kind+(p.note?'. '+p.note:'')+(p.cat==='junction'?' Position read off the park board (about 1 km accuracy).':'')})];
+  const nodes=[el('p',{class:'hint',text:kind+(p.note?'. '+p.note:'')+(p.cat==='junction'?({osm:' Position from OpenStreetMap.',snap:' Read off the park board and placed on the nearest road (may be a few hundred metres off).'}[p.src]||' Position read off the park board (about 1 km accuracy).'):'')})];
   if(rel)nodes.push(el('div',{class:'dir'},el('p',null,el('b',{text:'From you: '}),`${fmtD(rel.d)} ${DIRNAME[DIRS.indexOf(rel.dir)]} (straight line).`)));
   nodes.push(el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:p.x,y:p.y,name:p.cat==='junction'?'Junction '+p.num:(p.short||p.name)}),text:'Navigate here'}));
   nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();setManual(p.lat,p.lon,'Position set here.');},text:'I am here'}));
@@ -968,6 +1025,7 @@ function showPlan(r,title,top=[]){
   if(r.endOff>400)nodes.push(el('div',{class:'warnrow',style:'background:#EEF2F6;color:#2B3A4A',text:`The destination is ${fmtD(r.endOff)} from the nearest park road, so the route ends at the closest point on the road.`}));
   for(const w of r.warn)nodes.push(el('div',{class:'warnrow',text:`${RD[w.type][2]} ${RD[w.type][1]} on this route (${SEV.find(s=>s[0]===(w.sev||'1'))[1]}), reported ${ago(w.at)}. ${w.sev==='3'?'The route avoids it where it can.':'The route weighs it in.'}`}));
   for(const x of r.sights.slice(0,3))nodes.push(el('div',{class:'warnrow',style:'background:#E4F2E8;color:#1E4D2E',text:`${emoji(x)} ${label(x)} near this route, seen ${hhmm(x.lastSeen)} (${ago(x.lastSeen)})${x.example?' (example)':''}.`}));
+  if(r.approxLen>100)nodes.push(el('div',{class:'warnrow',style:'background:#F3EADB;color:#5A3D1A',text:`${fmtD(r.approxLen)} of this route is on a track from the park board that is not yet on OpenStreetMap (dashed on the map). The line is approximate, so follow the junction stones.`}));
   if(wetness()>=5)nodes.push(el('div',{class:'warnrow',style:'background:#DCEAF8;color:#1D4F86',text:`${wetness().toFixed(0)} mm of rain in the last 24 h. Tracks may be muddy, so the route prefers the main roads.`}));
   nodes.push(el('div',{class:'acts'},el('button',{class:'secondary',type:'button',onclick:startPreview,text:'▶ Preview step by step'}),el('button',{class:'primary green',type:'button',onclick:startNav,text:'Start'})));
   if(!myPos().gps)nodes.push(el('p',{class:'fine',text:'Your position is set by hand, so the route starts there. To be guided as you drive, choose "Use my GPS again" in the position menu, or try Demo drive in Settings.'}));
@@ -1006,7 +1064,8 @@ function navUpdate(){
   // locate the car on the route (search ahead of last position first)
   let best=null;const scan=(i0,i1)=>{for(let i=Math.max(1,i0);i<Math.min(R.pts.length,i1);i++){const a=R.pts[i-1],b=R.pts[i];const q=projSeg(p.x,p.y,a[0],a[1],b[0],b[1]);const prog=R.cum[i-1]+q.t*(R.cum[i]-R.cum[i-1]);const pen=prog<N.prog-40?40:0;if(!best||q.d+pen<best.d+best.pen)best={i,d:q.d,prog,pen};}};
   scan(N.seg-3,N.seg+80);if(!best||best.d>60)scan(1,R.pts.length);
-  const tol=Math.max(45,(S.gps.acc||10)*1.5);
+  let tol=Math.max(45,(S.gps.acc||10)*1.5);
+  if(R.approxSeg&&best&&(R.approxSeg[best.i]||R.approxSeg[best.i+1]||R.approxSeg[Math.max(0,best.i-1)]))tol=Math.max(tol,450);   // approximate board track
   if(best.d>tol){N.off++;if(N.off>=3&&Date.now()-(N.lastRe||0)>8000){N.lastRe=Date.now();const left=(R.stops||[]).filter(st=>st.d>N.prog+30);const r=left.length>1?routeMulti(p,left):route(p.x,p.y,R.dest[0],R.dest[1],R.destName);if(!r.error){S.route=r;N.prog=0;N.seg=1;N.off=0;N.spoken={};say('Rerouting.');toast('New route.');return navUpdate();}}}
   else {N.off=0;N.seg=best.i;N.prog=Math.max(best.prog,Math.min(N.prog,best.prog+5));N.prog=best.prog;}
   const next=R.instr.find(s=>s.d>N.prog+3)||R.instr[R.instr.length-1];N.next=next;const dist=Math.max(0,next.d-N.prog);
@@ -1459,6 +1518,6 @@ async function boot(){
   setInterval(()=>{if(!S.nav&&S.follow){const p=myPos();if(p&&p.gps){cam.cx=p.x;cam.cy=p.y;redraw();}}},1000);
   if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
   if(!S.set.hideEx&&allReports().some(r=>r.example))banner('No live reports yet. Pins marked EXAMPLE are samples.','Hide',()=>{S.set.hideEx=true;saveSet();hideBanner();redraw();},'ex');
-  window.AKL=S;window.AKLf={route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
+  window.AKL=S;window.AKLf={previewRoute,centerOn,route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
 }
 boot();

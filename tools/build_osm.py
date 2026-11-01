@@ -99,7 +99,8 @@ ways = [el for el in road_raw["elements"] if el["type"] == "way"]
 keep = []
 for wy in ways:
     t = wy.get("tags", {}); h = t.get("highway")
-    if t.get("access") in ("private", "no") and h not in MAJOR: continue
+    # tracks closed to visitors are kept but flagged (drawn, not routed)
+    closed = h not in MAJOR and (t.get("access") in ("private", "no") or t.get("motor_vehicle") in ("private", "no") or t.get("motorcar") in ("private", "no"))
     pts = [nodes[i] for i in wy["nodes"] if i in nodes]
     if len(pts) < 2: continue
     mid = pts[len(pts)//2]
@@ -109,6 +110,8 @@ used = {}
 out_nodes = []
 out_ways = []
 for wy in keep:
+    t = wy.get("tags", {}); h = t.get("highway")
+    closed = h not in MAJOR and (t.get("access") in ("private", "no") or t.get("motor_vehicle") in ("private", "no") or t.get("motorcar") in ("private", "no"))
     idx = []
     for nid in wy["nodes"]:
         if nid not in nodes: continue
@@ -118,10 +121,11 @@ for wy in keep:
         idx.append(used[nid])
     t = wy.get("tags", {})
     o = {"n": idx, "h": t.get("highway")}
+    if closed: o["a"] = "no"
     for k_src, k_out in (("name", "nm"), ("surface", "s"), ("tracktype", "t"), ("oneway", "o"), ("ref", "r")):
         if t.get(k_src): o[k_out] = t[k_src]
     out_ways.append(o)
-print("roads", len(out_ways), "nodes", len(out_nodes)//2)
+print("roads", len(out_ways), "closed", sum(1 for w in out_ways if w.get("a")), "nodes", len(out_nodes)//2)
 
 # ---- water, wetland ----
 water_q = f"""[out:json][timeout:240];
@@ -153,19 +157,26 @@ poi_q = f"""[out:json][timeout:180];
 (nwr["tourism"]{bb}; nwr["amenity"~"^(fuel|ranger_station|parking|toilets|restaurant|shelter|police)$"]{bb};
  nwr["barrier"="gate"]["name"]{bb}; nwr["natural"~"^(peak|viewpoint|hill)$"]["name"]{bb};
  nwr["place"~"^(locality|island|peninsula|plain|hamlet|village)$"]["name"]{bb};
- nwr["leisure"="picnic_table"]{bb}; nwr["historic"]["name"]{bb};);
+ nwr["leisure"="picnic_table"]{bb}; nwr["historic"]["name"]{bb};
+ node["name"~"^[0-9]{{1,3}}$"]{bb}; node["ref"~"^[0-9]{{1,3}}$"][!"highway"][!"name"]{bb};);
 out center tags;"""
 poi_raw = overpass(poi_q)
 pois = []
+seen_j = set()
 for el in poi_raw.get("elements", []):
     t = el.get("tags", {})
     lat = el.get("lat") or (el.get("center") or {}).get("lat")
     lon = el.get("lon") or (el.get("center") or {}).get("lon")
     if lat is None: continue
     if not near_park(lon, lat, 6.0): continue
-    kind = t.get("tourism") or t.get("amenity") or t.get("barrier") or t.get("natural") or t.get("place") or t.get("leisure") or t.get("historic")
-    if not t.get("name") and kind not in ("viewpoint", "picnic_site", "camp_site", "fuel", "ranger_station"): continue
-    pois.append({"nm": t.get("name", ""), "k": kind, "lat": round(lat, 6), "lon": round(lon, 6)})
+    kind = t.get("tourism") or t.get("amenity") or t.get("barrier") or t.get("natural") or t.get("place") or t.get("leisure") or t.get("historic") or "junction"
+    nm = t.get("name", "")
+    if not nm and t.get("ref", "").isdigit() and len(t["ref"]) <= 3: nm = t["ref"]
+    if nm.isdigit():                       # junction stone: inside the park only, once per number
+        if not near_park(lon, lat, 1.0) or nm in seen_j: continue
+        seen_j.add(nm)
+    elif not nm and kind not in ("viewpoint", "picnic_site", "camp_site", "fuel", "ranger_station"): continue
+    pois.append({"nm": nm, "k": kind, "lat": round(lat, 6), "lon": round(lon, 6)})
 print("pois", len(pois))
 
 out = {"meta": {"generated": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%MZ"), "bbox": BBOX,

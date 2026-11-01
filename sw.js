@@ -1,6 +1,6 @@
 /* Offline support: the app, map data and fonts are cached so the map, your GPS position,
    routing and saved reports keep working without signal in the park. */
-const VERSION = 'akl-v2.4.0';
+const VERSION = 'akl-v2.5.0';
 const CORE = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'species.js', 'emergency.js', 'manifest.webmanifest', 'data/board.json', 'data/osm.json', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => Promise.all(CORE.map(u => c.add(u).catch(() => null)))).then(() => self.skipWaiting()));
