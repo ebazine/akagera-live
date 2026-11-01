@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1E3A24">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="description" content="Live animal sightings, road conditions and GPS navigation for Akagera National Park, Rwanda.">
+<title>Akagera Live</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <!-- ===== browse header ===== -->
+  <header class="top" id="top">
+    <div class="brand">
+      <svg width="32" height="32" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="16" fill="#E35F14"/><path d="M17 6l3.2 9.2L17 28l-3.2-12.8z" fill="#fff"/><circle cx="17" cy="17" r="2.4" fill="#1E3A24"/></svg>
+      <b>Akagera Live</b>
+    </div>
+    <div class="stat">
+      <button class="pill" id="wxPill" type="button" aria-label="Weather and road outlook"><span class="wxi" aria-hidden="true">☁</span><span id="wxText">…</span></button>
+      <button class="pill" id="syncPill" type="button" aria-label="Sharing status"><i></i><span>…</span></button>
+      <button class="iconbtn" id="setBtn" type="button" aria-label="Settings">
+        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zm8.6 4.9l1.9 1.5-2 3.4-2.3-.8a8 8 0 01-2 1.2L15.8 21h-4l-.4-2.4a8 8 0 01-2-1.2l-2.3.8-2-3.4 1.9-1.5a8 8 0 010-2.3L5.1 9.5l2-3.4 2.3.8a8 8 0 012-1.2L11.8 3h4l.4 2.4a8 8 0 012 1.2l2.3-.8 2 3.4-1.9 1.5a8 8 0 010 2.3z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="mapwrap" id="mapwrap">
+    <div class="tiltbox" id="tiltbox"><canvas id="map" aria-label="Map of Akagera National Park"></canvas></div>
+
+    <!-- browse controls -->
+    <div class="fabcol" id="fabcol">
+      <button class="fab" id="zin" type="button" aria-label="Zoom in">+</button>
+      <button class="fab" id="zout" type="button" aria-label="Zoom out">&minus;</button>
+      <button class="fab" id="layerBtn" type="button" aria-label="Switch between map and satellite"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5zm-9 9l9 5 9-5M3 16l9 5 9-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+      <button class="fab me" id="followBtn" type="button" aria-label="Show my position"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l18-8-8 18-2-8-8-2z" fill="currentColor"/></svg></button>
+    </div>
+    <div class="banner" id="banner" hidden></div>
+    <div class="bottom" id="bottomBar">
+      <div class="gpsline" id="gpsline">Starting GPS…</div>
+      <div class="btns">
+        <button class="bigbtn find" id="findBtn" type="button"><span aria-hidden="true">🦁</span>Animals</button>
+        <button class="bigbtn report" id="reportBtn" type="button"><svg width="26" height="26" viewBox="0 0 22 22" aria-hidden="true"><path d="M11 3v16M3 11h16" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/></svg>Report</button>
+        <button class="bigbtn go" id="goBtn" type="button"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l7 19-7-4-7 4 7-19z" fill="currentColor"/></svg>Go</button>
+      </div>
+    </div>
+
+    <!-- ===== navigation UI ===== -->
+    <div class="nav-top" id="navTop" hidden>
+      <div class="man"><canvas id="manIcon" width="120" height="120" aria-hidden="true"></canvas></div>
+      <div class="mantext"><div class="mandist" id="manDist">—</div><div class="manname" id="manText">Starting route</div></div>
+    </div>
+    <div class="nav-then" id="navThen" hidden></div>
+    <div class="nav-warn" id="navWarn" hidden></div>
+    <div class="nav-bottom" id="navBottom" hidden>
+      <button class="navx" id="navEnd" type="button" aria-label="End navigation">&times;</button>
+      <div class="eta"><b id="etaTime">--:--</b><span id="etaRest">-- min · -- km</span></div>
+      <button class="navbtn" id="navReport" type="button" aria-label="Report">+</button>
+      <button class="navbtn" id="navMute" type="button" aria-label="Mute voice">🔊</button>
+    </div>
+    <div class="speed" id="speedBox" hidden><b id="speedVal">0</b><span>km/h</span></div>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+  </div>
+
+  <!-- ===== bottom sheet ===== -->
+  <section id="sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-h">
+      <button class="back" id="sheetBack" type="button" aria-label="Back" hidden>&#8249;</button>
+      <h2 id="sheetTitle"></h2>
+      <div class="dots" id="sheetDots" aria-hidden="true"></div>
+      <button class="x" id="sheetClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="sheet-b" id="sheetBody"></div>
+  </section>
+</div>
+<script src="config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

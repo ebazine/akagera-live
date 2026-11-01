@@ -1,0 +1,28 @@
+name: Update OpenStreetMap data
+on:
+  workflow_dispatch:
+  push:
+    paths: ["tools/build_osm.py", ".github/workflows/osm.yml"]
+  schedule:
+    - cron: "17 3 * * 1"   # every Monday 03:17 UTC
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download and build map data
+        run: |
+          mkdir -p data
+          python tools/build_osm.py
+      - name: Commit data
+        run: |
+          git config user.name "akagera-live-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/osm.json
+          git diff --cached --quiet || git commit -m "Update OpenStreetMap data"
+          git push
