@@ -38,24 +38,82 @@ Without this, reports stay on the phone that made them.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function hasPass() { return signedIn() && exists(/databases/$(database)/documents/profiles/$(request.auth.uid)); }
+
     match /reports/{id} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['kind','type','lat','lon','at','lastSeen','by','votes','count','heading','act','rdist','sev','note'])
+      allow create: if request.resource.data.keys().hasOnly(['kind','type','lat','lon','at','lastSeen','by','votes','count','heading','act','rdist','sev','note','uid'])
         && request.resource.data.kind in ['animal','road']
         && request.resource.data.type is string && request.resource.data.type.size() < 20
         && request.resource.data.lat is number && request.resource.data.lat > -2.3 && request.resource.data.lat < -1.0
         && request.resource.data.lon is number && request.resource.data.lon > 30.2 && request.resource.data.lon < 31.2
         && request.resource.data.at is number
-        && request.resource.data.note is string && request.resource.data.note.size() <= 200;
+        && request.resource.data.note is string && request.resource.data.note.size() <= 200
+        && (!('uid' in request.resource.data) || (signedIn() && request.resource.data.uid == request.auth.uid));
       allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes','lastSeen','note','act','rdist'])
         && request.resource.data.note is string && request.resource.data.note.size() <= 200;
       allow delete: if false;
+    }
+
+    match /profiles/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name','vehicle','color','party','emoji','chat','createdAt','expiresAt','lastSeen'])
+        && request.resource.data.name is string && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 30
+        && request.resource.data.vehicle is string && request.resource.data.vehicle.size() <= 40
+        && request.resource.data.party is string && request.resource.data.party.size() <= 40
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt < request.time + duration.value(5, 'd');
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /chat/{id} {
+      allow read: if hasPass();
+      allow create: if hasPass() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid','name','emoji','vehicle','text','at','expiresAt','kind','rep'])
+        && request.resource.data.text is string && request.resource.data.text.size() <= 500
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt < request.time + duration.value(2, 'd');
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /dms/{pair} {
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow create: if hasPass() && request.auth.uid in request.resource.data.members
+        && request.resource.data.members.size() == 2
+        && pair == request.resource.data.members[0] + '_' + request.resource.data.members[1];
+      allow update: if signedIn() && request.auth.uid in resource.data.members
+        && request.resource.data.members == resource.data.members;
+      match /msgs/{id} {
+        allow read: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/dms/$(pair)).data.members;
+        allow create: if hasPass() && request.resource.data.uid == request.auth.uid
+          && request.auth.uid in get(/databases/$(database)/documents/dms/$(pair)).data.members
+          && request.resource.data.text is string && request.resource.data.text.size() <= 500
+          && request.resource.data.expiresAt is timestamp;
+        allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      }
     }
   }
 }
 ```
 
 The Firebase web config is not a secret; the rules above decide what visitors can write.
+
+## Trip passes and chat
+
+A **trip pass** is a temporary driver profile: a name or nickname, the vehicle (model and colour), who is in the car and a sign (an animal emoji). There is no password or email; the phone gets an anonymous Firebase sign-in. The pass lasts 1 to 4 days, chosen by the driver, and can be extended a day at a time or ended at once (which deletes the pass and every chat message the driver wrote).
+
+- **Park chat** for everyone with a pass who opted in. Messages last 24 hours. Quick replies ("Still there?", "On my way") and one-tap sharing of a sighting as a card others can open or navigate to.
+- **Private messages** between two drivers, deleted after 4 days. Any driver can be blocked on your phone.
+- **Driving lock:** typing is paused above 10 km/h unless you confirm you are a passenger. Quick replies still work.
+- Reports show "Reported by Elies · White Toyota Prado" while the pass is active (can be switched off); afterwards the name disappears.
+
+Firebase setup for this (once):
+
+1. **Authentication > Get started > Sign-in method > Anonymous > Enable > Save.**
+2. **Firestore Database > Rules:** publish the rules above.
+3. Recommended, for automatic deletion: **Firestore Database > Time-to-live (TTL) > Create policy** four times, field `expiresAt`, collection groups `profiles`, `chat`, `dms` and `msgs`. The app already hides expired items; TTL removes them from the database (usually within 24 hours of expiry).
 
 ## Files
 

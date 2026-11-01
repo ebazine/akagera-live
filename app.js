@@ -355,7 +355,7 @@ function clean(id,d){
     count:COUNTS.includes(d.count)?d.count:null,act:ACTS.includes(d.act)?d.act:null,
     heading:Number.isInteger(d.heading)&&d.heading>=-1&&d.heading<8?d.heading:null,
     rdist:ROADDIST.includes(d.rdist)?d.rdist:null,sev:['1','2','3'].includes(d.sev)?d.sev:null,
-    note:typeof d.note==='string'?d.note.slice(0,200):'',by:typeof d.by==='string'?d.by.slice(0,60):'',votes,pending:!!d.pending,example:!!d.example};
+    note:typeof d.note==='string'?d.note.slice(0,200):'',by:typeof d.by==='string'?d.by.slice(0,60):'',uid:typeof d.uid==='string'?d.uid.slice(0,64):'',votes,pending:!!d.pending,example:!!d.example};
 }
 async function initSharing(){
   const cfg=window.AKAGERA_FIREBASE;
@@ -367,7 +367,9 @@ async function initSharing(){
     const F=await import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`);
     const app=A.initializeApp(cfg);
     let db;try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache({tabManager:F.persistentMultipleTabManager()})});}catch(e){db=F.getFirestore(app);}
-    S.fs={F,db};
+    S.fs={F,db,uid:null};
+    S.fs.authReady=import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`).then(AU=>{const auth=AU.getAuth(app);S.fs.AU=AU;S.fs.auth=auth;
+      AU.onAuthStateChanged(auth,u=>{S.fs.uid=u?u.uid:null;if(u&&passValid())startSocial();else if(!u)endSocial();});}).catch(()=>{});
     const q=F.query(F.collection(db,'reports'),F.where('at','>',Date.now()-14*864e5),F.orderBy('at','desc'),F.limit(600));
     F.onSnapshot(q,{includeMetadataChanges:true},snap=>{
       S.live=snap.docs.map(d=>{const o=clean(d.id,d.data());if(o)o.pending=d.metadata.hasPendingWrites;return o;}).filter(Boolean);
@@ -682,7 +684,7 @@ function onTap(x,y){
    10. Sheets and flows
    ========================================================================= */
 let backFn=null,sheetView=null,pendingAfterPos=null;
-function openSheet(title,nodes,o={}){$('sheetTitle').textContent=title;$('sheetBody').replaceChildren(...nodes.filter(Boolean));$('sheet').hidden=false;sheetView=o.view||null;backFn=o.back||null;$('sheetBack').hidden=!o.back;
+function openSheet(title,nodes,o={}){$('sheet').classList.toggle('tall',!!o.tall);if(!o.view||!(o.view.startsWith('chat:')||o.view.startsWith('thread:')))SOC.render=null;$('sheetTitle').textContent=title;$('sheetBody').replaceChildren(...nodes.filter(Boolean));$('sheet').hidden=false;sheetView=o.view||null;backFn=o.back||null;$('sheetBack').hidden=!o.back;
   const dots=$('sheetDots');dots.replaceChildren();if(o.step){for(let i=1;i<=o.step[1];i++)dots.append(el('i',{class:i<=o.step[0]?'on':''}));}$('sheetBody').scrollTop=0;}
 function closeSheet(){$('sheet').hidden=true;sheetView=null;selected=null;redraw();}
 $('sheetClose').onclick=closeSheet;$('sheetBack').onclick=()=>backFn&&backFn();
@@ -756,6 +758,7 @@ function sendReport(){
   const now=Date.now();
   const rec={id:'r'+now.toString(36)+Math.random().toString(36).slice(2,6),kind:D.kind,type:D.type,lat:+D.lat.toFixed(6),lon:+D.lon.toFixed(6),at:now,lastSeen:now,by:S.device,votes:{},note:''};
   if(D.kind==='animal'){rec.count=D.count||'1';rec.heading=D.heading??-1;}else rec.sev=D.sev||'1';
+  if(passValid()&&S.fs&&S.fs.uid&&LS.get('showName',true))rec.uid=S.fs.uid;
   saveReport(rec);closeSheet();
   const fresh=D.kind==='animal'?tick(rec.type,'report'):null;
   const what=D.kind==='animal'?`${label(clean(rec.id,rec))}${rec.heading>=0?`, heading ${DIRNAME[rec.heading]}`:''}`:`${RD[rec.type][1]} (${SEV.find(s=>s[0]===rec.sev)[1]})`;
@@ -903,7 +906,9 @@ function openReportView(r,silent){
   if(r.kind==='road'){const life=roadLife(r);lines.push(el('p',null,el('b',{text:'Likely until: '}),`about ${stamp(life.until)}.`));lines.push(el('p',{class:'fine',text:life.why+(life.next>=2?` More rain is forecast (${Math.round(life.next)} mm in the next 12 h), which would make it last longer.`:'')}));}
   nodes.push(el('div',{class:'dir'},...lines));
   if(r.note)nodes.push(el('p',{class:'note',text:r.note}));
+  {const who=r.uid?personByUid(r.uid):null;if(who)nodes.push(el('p',{class:'fine',text:`Reported by ${who.emoji} ${who.name} · ${vehLabel(who)}`}));else if(r.by===S.device)nodes.push(el('p',{class:'fine',text:'Reported by you'}));}
   nodes.push(el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:q[0],y:q[1],name:label(r)}),text:'Navigate here'}));
+  if(!r.example&&passValid()&&SOC.profile.chat)nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>shareToChat(r),text:'💬 Share in the park chat'}));
   if(r.kind==='animal'&&SPX[r.type]&&SPX[r.type].where)nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>openSpecies(r.type),text:`${SPX[r.type].name}: safety and facts`}));
   if(!r.example){const mine=r.by===S.device;nodes.push(el('div',{class:'acts'},el('button',{class:'secondary ok',type:'button',onclick:()=>{patchReport(r,{votes:{[S.device]:1},lastSeen:Date.now()});toast('Thanks. Marked as still there.');},text:'Still there'}),el('button',{class:'secondary no',type:'button',onclick:()=>{patchReport(r,{votes:{[S.device]:-1}});closeSheet();toast(mine?'Removed.':'Thanks. Marked as gone.');},text:mine?'Remove my report':'Not there any more'})));}
   openSheet(r.kind==='animal'?'Sighting':'Road report',nodes,{view:'rep:'+r.id});redraw();
@@ -1065,6 +1070,207 @@ function drawMan(c,type){
 }
 
 /* =========================================================================
+   11b. Trip pass (temporary driver profile) and chat
+   A trip pass is a name and vehicle tied to an anonymous Firebase sign-in on this phone.
+   It deletes itself after 1-4 days. Park chat messages last 24 hours.
+   ========================================================================= */
+const COLORS=['White','Silver','Grey','Black','Green','Beige','Blue','Red','Other'];
+const AVATARS=['🦁','🐘','🦒','🦓','🦏','🐆','🦛','🦅','🐒','🦉'];
+const QUICK=['Where exactly?','Still there?','Thanks!','On my way','Road clear?','Gone now'];
+const SOC={profile:LS.get('pass',null),people:[],chat:[],dms:[],thread:null,threadMsgs:[],lastRead:LS.get('chatRead',0),dmRead:LS.get('dmRead',{}),blocked:LS.get('blocked',[]),passenger:false,subs:{},render:null,started:false};
+if(SOC.profile&&!(SOC.profile.expiresAt>Date.now())){SOC.profile=null;LS.set('pass',null);}
+const passValid=()=>!!(SOC.profile&&SOC.profile.expiresAt>Date.now());
+const vehLabel=p=>[p.color&&p.color!=='Other'?p.color:'',p.vehicle].filter(Boolean).join(' ')||'Vehicle not given';
+const tsMs=v=>v&&typeof v.toMillis==='function'?v.toMillis():+v||0;
+async function ensureAuth(){
+  if(!S.fs)throw {code:'nodb'};if(S.fs.uid)return S.fs.uid;
+  if(S.fs.authReady)await S.fs.authReady;if(!S.fs.AU)throw {code:'auth/network-request-failed'};if(S.fs.uid)return S.fs.uid;
+  const cred=await S.fs.AU.signInAnonymously(S.fs.auth);S.fs.uid=cred.user.uid;return S.fs.uid;
+}
+function cleanProfile(id,d){if(!d||typeof d.name!=='string')return null;const exp=tsMs(d.expiresAt);if(exp<Date.now())return null;
+  return {uid:id,name:d.name.slice(0,30),vehicle:String(d.vehicle||'').slice(0,40),color:COLORS.includes(d.color)?d.color:'',party:String(d.party||'').slice(0,40),emoji:AVATARS.includes(d.emoji)?d.emoji:'🙂',chat:!!d.chat,expiresAt:exp,lastSeen:tsMs(d.lastSeen)};}
+function cleanMsg(id,d){if(!d||typeof d.text!=='string'||typeof d.uid!=='string')return null;const at=+d.at;if(!(at>1.6e12))return null;
+  const m={id,uid:d.uid,name:String(d.name||'Driver').slice(0,30),emoji:AVATARS.includes(d.emoji)?d.emoji:'🙂',vehicle:String(d.vehicle||'').slice(0,50),text:d.text.slice(0,500),at,kind:d.kind==='sighting'?'sighting':'text'};
+  if(m.kind==='sighting'&&d.rep&&typeof d.rep==='object'){const r=d.rep;if(+r.lat<-1&&+r.lat>-2.3&&+r.lon>30.2&&+r.lon<31.2)m.rep={id:String(r.id||''),type:String(r.type||''),kind:r.kind==='road'?'road':'animal',label:String(r.label||'').slice(0,60),lat:+r.lat,lon:+r.lon,at:+r.at||at};}
+  return m;}
+const pairId=(a,b)=>a<b?`${a}_${b}`:`${b}_${a}`;
+function personByUid(uid){return SOC.people.find(p=>p.uid===uid)||null;}
+
+function startSocial(){
+  if(!S.fs||!S.fs.uid||!passValid()||SOC.started)return;SOC.started=true;
+  const {F,db}=S.fs,uid=S.fs.uid;
+  SOC.subs.people=F.onSnapshot(F.query(F.collection(db,'profiles'),F.where('expiresAt','>',F.Timestamp.now())),snap=>{
+    SOC.people=snap.docs.map(d=>cleanProfile(d.id,d.data())).filter(Boolean);socRefresh('people');redraw();},e=>{});
+  if(SOC.profile.chat){
+    SOC.subs.chat=F.onSnapshot(F.query(F.collection(db,'chat'),F.where('at','>',Date.now()-24*3600e3),F.orderBy('at','desc'),F.limit(150)),snap=>{
+      const before=new Set(SOC.chat.map(m=>m.id));
+      SOC.chat=snap.docs.map(d=>cleanMsg(d.id,d.data())).filter(Boolean).reverse();
+      const fresh=SOC.chat.filter(m=>!before.has(m.id)&&m.uid!==uid&&!SOC.blocked.includes(m.uid));
+      if(before.size&&fresh.length&&sheetView!=='chat:park'&&!S.nav)toast(`${fresh[fresh.length-1].emoji} ${fresh[fresh.length-1].name}: ${fresh[fresh.length-1].text||'shared a sighting'}`.slice(0,90),'Open',()=>openChat('park'),5000);
+      socRefresh('park');updateChatBadge();},e=>{});
+    SOC.subs.dms=F.onSnapshot(F.query(F.collection(db,'dms'),F.where('members','array-contains',uid)),snap=>{
+      SOC.dms=snap.docs.map(d=>({id:d.id,...d.data()})).filter(t=>Array.isArray(t.members)&&tsMs(t.expiresAt)>Date.now());socRefresh('dms');updateChatBadge();},e=>{});
+  }
+  // keep "last active" fresh while the app is open (at most every 10 minutes)
+  const ping=()=>{if(!passValid())return endSocial();F.updateDoc(F.doc(db,'profiles',uid),{lastSeen:F.Timestamp.now()}).catch(()=>{});};
+  ping();SOC.subs.ping=setInterval(ping,10*60e3);
+  updateMeBtn();updateChatBadge();
+}
+function endSocial(){for(const k in SOC.subs){const u=SOC.subs[k];if(typeof u==='function')u();else clearInterval(u);}SOC.subs={};SOC.started=false;SOC.chat=[];SOC.dms=[];SOC.people=[];if(SOC.threadUnsub){SOC.threadUnsub();SOC.threadUnsub=null;}updateChatBadge();updateMeBtn();}
+function socRefresh(kind){if($('sheet').hidden)return;if(sheetView==='chat:'+kind&&SOC.render)SOC.render();else if(kind==='dms'&&sheetView&&sheetView.startsWith('thread:')&&SOC.render)SOC.render();else if(sheetView==='pass'&&kind==='people')openPass();}
+function unreadCount(){if(!passValid())return 0;const uid=S.fs&&S.fs.uid;let n=SOC.chat.filter(m=>m.at>SOC.lastRead&&m.uid!==uid&&!SOC.blocked.includes(m.uid)).length;for(const t of SOC.dms){if((t.lastAt||0)>(SOC.dmRead[t.id]||0)&&t.lastBy!==uid)n++;}return n;}
+function updateChatBadge(){const b=$('chatBadge');if(!b)return;const n=unreadCount();b.hidden=!n;b.textContent=n>9?'9+':String(n);}
+function updateMeBtn(){const b=$('meBtn');if(!b)return;b.textContent=passValid()?SOC.profile.emoji:'👤';b.setAttribute('aria-label',passValid()?`Trip pass: ${SOC.profile.name}`:'Create a trip pass');}
+
+/* ---------- trip pass sheet ---------- */
+function openPass(edit){
+  if(!S.fs){openSheet('Trip pass',[el('p',{class:'hint',text:'Trip passes and chat need the shared database (Firebase). It is not connected on this phone right now.'})],{view:'pass'});return;}
+  if(passValid()&&!edit)return showPass();
+  const P=(edit&&SOC.profile)||{};const f={name:P.name||'',vehicle:P.vehicle||'',color:P.color||'White',party:P.party||'',emoji:P.emoji||'🦁',days:3,chat:edit?!!P.chat:true,showName:LS.get('showName',true)};
+  const name=el('input',{class:'search',id:'p-name',maxlength:'30',placeholder:'Your first name or nickname',autocomplete:'given-name','aria-label':'Name'});name.value=f.name;
+  const veh=el('input',{class:'search',id:'p-veh',maxlength:'40',placeholder:'Vehicle, e.g. Toyota Prado','aria-label':'Vehicle'});veh.value=f.vehicle;
+  const party=el('input',{class:'search',id:'p-party',maxlength:'40',placeholder:'Optional: e.g. 2 adults, 2 kids','aria-label':'Who is in the car'});party.value=f.party;
+  const chips=(list,key,lab)=>{const w=el('div',{class:'optrow'});for(const v of list){const b=el('button',{type:'button',class:'opt'+(f[key]===v?' on':''),text:lab?lab(v):String(v)});b.onclick=()=>{f[key]=v;[...w.children].forEach(c=>c.classList.remove('on'));b.classList.add('on');};w.append(b);}return w;};
+  const chatT=el('input',{type:'checkbox',id:'p-chat'});chatT.checked=f.chat;const nameT=el('input',{type:'checkbox',id:'p-show'});nameT.checked=f.showName;
+  const save=el('button',{class:'primary',type:'button',text:edit?'Save changes':'Create my trip pass'});
+  save.onclick=async()=>{f.name=name.value.trim();f.vehicle=veh.value.trim();f.party=party.value.trim();f.chat=chatT.checked;f.showName=nameT.checked;
+    if(f.name.length<2){toast('Please enter a name of at least 2 letters.');name.focus();return;}
+    save.disabled=true;const label0=save.textContent;save.textContent='Saving…';
+    try{if(edit)f.expiresAt=SOC.profile.expiresAt;await savePass(f,!edit);LS.set('showName',f.showName);
+      if(edit){showPass();toast('Saved.');}else{closeSheet();toast(`Welcome, ${f.name}! Your pass lasts ${f.days} day${f.days>1?'s':''}.`);if(f.chat)setTimeout(()=>openChat('park'),600);}}
+    catch(e){save.disabled=false;save.textContent=label0;passError(e);}};
+  openSheet(edit?'Edit trip pass':'Trip pass',[
+    edit?null:el('div',{class:'passintro'},el('b',{text:'Temporary. No password, no email.'}),el('span',{text:'Your name and vehicle let other drivers recognise you in the park chat and on your reports. Everything is deleted automatically when the pass ends.'})),
+    el('p',{class:'lbl',text:'Name'}),name,
+    el('p',{class:'lbl',text:'Vehicle'}),veh,chips(COLORS,'color'),
+    el('p',{class:'lbl',text:'Who is in the car'}),party,
+    el('p',{class:'lbl',text:'Your sign'}),chips(AVATARS,'emoji'),
+    edit?null:el('p',{class:'lbl',text:'Pass lasts'}),edit?null:chips([1,2,3,4],'days',d=>`${d} day${d>1?'s':''}`),
+    el('label',{class:'toggle',for:'p-chat'},'Join the park chat',chatT),
+    el('label',{class:'toggle',for:'p-show'},'Show my name on my reports',nameT),
+    save,
+    el('p',{class:'fine',text:'Please do not share number plates, phone numbers or exact plans. Only people with a trip pass can read the chat.'})
+  ],{view:edit?'pass-edit':'pass-new',back:edit?showPass:null});
+}
+async function savePass(f,isNew){
+  const uid=await ensureAuth();const {F,db}=S.fs;const now=Date.now();
+  const created=isNew||!SOC.profile?now:SOC.profile.createdAt;const exp=isNew?now+f.days*864e5:f.expiresAt;
+  const doc={name:f.name.slice(0,30),vehicle:f.vehicle.slice(0,40),color:f.color,party:(f.party||'').slice(0,40),emoji:f.emoji,chat:!!f.chat,createdAt:F.Timestamp.fromMillis(created),expiresAt:F.Timestamp.fromMillis(exp),lastSeen:F.Timestamp.now()};
+  await F.setDoc(F.doc(db,'profiles',uid),doc);
+  SOC.profile={uid,name:doc.name,vehicle:doc.vehicle,color:doc.color,party:doc.party,emoji:doc.emoji,chat:doc.chat,createdAt:created,expiresAt:exp};LS.set('pass',SOC.profile);
+  endSocial();startSocial();updateMeBtn();
+}
+function passError(e){const c=e&&e.code||'';
+  if(c==='auth/operation-not-allowed'||c==='auth/admin-restricted-operation')openSheet('One setting missing',[el('p',{class:'hint',text:'Anonymous sign-in is not switched on in the Firebase project yet. In the Firebase console: Authentication > Get started > Sign-in method > Anonymous > Enable > Save. Then try again.'})],{view:'passerr'});
+  else if(c==='permission-denied')openSheet('Database rules need an update',[el('p',{class:'hint',text:'The Firestore rules do not allow trip passes yet. Publish the new rules from the README (Firestore Database > Rules), then try again.'})],{view:'passerr'});
+  else if(c==='auth/network-request-failed'||c==='unavailable')toast('No signal. Try again when you have coverage.');
+  else toast('Could not create the pass: '+(c||'error'),null,null,6000);}
+function showPass(){
+  const p=SOC.profile;const left=p.expiresAt-Date.now();
+  const others=SOC.people.filter(x=>x.uid!==p.uid&&x.chat&&Date.now()-x.lastSeen<12*3600e3).length;
+  openSheet('Trip pass',[
+    el('div',{class:'passcard'},el('span',{class:'av',text:p.emoji}),el('div',null,el('b',{text:p.name}),el('span',{text:vehLabel(p)}),p.party?el('span',{text:p.party}):null),
+      el('small',{text:`Ends ${stamp(p.expiresAt)} · ${left>864e5?Math.floor(left/864e5)+' d '+Math.round((left%864e5)/3600e3)+' h':Math.max(1,Math.round(left/3600e3))+' h'} left`})),
+    el('div',{class:'acts'},
+      p.chat?el('button',{class:'primary blue',type:'button',onclick:()=>openChat('park'),text:`💬 Park chat${others?` · ${others} here`:''}`}):el('button',{class:'primary blue',type:'button',onclick:()=>togglePassChat(true),text:'Join the park chat'})),
+    el('div',{class:'acts'},
+      el('button',{class:'secondary',type:'button',onclick:()=>openPass(true),text:'Edit'}),
+      el('button',{class:'secondary',type:'button',disabled:p.expiresAt-Date.now()>3.9*864e5,onclick:extendPass,text:'Add a day'})),
+    p.chat?el('button',{class:'secondary',type:'button',onclick:()=>togglePassChat(false),text:'Leave the chat (stay hidden)'}):null,
+    el('button',{class:'secondary no',type:'button',onclick:confirmEnd,text:'End my trip now and delete everything'}),
+    el('p',{class:'fine',text:'Your pass, your chat messages and your name on reports disappear when the pass ends. Reports themselves stay (without your name) until they expire.'})
+  ],{view:'pass'});
+}
+async function extendPass(){const p=SOC.profile;const exp=Math.min(Date.now()+4*864e5,p.expiresAt+864e5);try{const {F,db}=S.fs;await F.updateDoc(F.doc(db,'profiles',S.fs.uid),{expiresAt:F.Timestamp.fromMillis(exp)});p.expiresAt=exp;LS.set('pass',p);showPass();toast('One day added.');}catch(e){passError(e);}}
+async function togglePassChat(on){const p=SOC.profile;try{const {F,db}=S.fs;await F.updateDoc(F.doc(db,'profiles',S.fs.uid),{chat:on});p.chat=on;LS.set('pass',p);endSocial();startSocial();showPass();if(on)openChat('park');}catch(e){passError(e);}}
+function confirmEnd(){openSheet('End your trip?',[el('p',{class:'hint',text:'This deletes your trip pass and every chat message you wrote, now. Your list of ticked animals stays on this phone.'}),
+  el('button',{class:'primary',type:'button',onclick:endTrip,text:'Delete my pass and messages'}),el('button',{class:'secondary',type:'button',onclick:showPass,text:'Keep my pass'})],{view:'end'});}
+async function endTrip(){
+  const {F,db}=S.fs,uid=S.fs.uid;toast('Deleting…');
+  try{
+    const mine=await F.getDocs(F.query(F.collection(db,'chat'),F.where('uid','==',uid)));for(const d of mine.docs)await F.deleteDoc(d.ref);
+    for(const t of SOC.dms){const ms=await F.getDocs(F.query(F.collection(db,'dms',t.id,'msgs'),F.where('uid','==',uid)));for(const d of ms.docs)await F.deleteDoc(d.ref);}
+    await F.deleteDoc(F.doc(db,'profiles',uid));
+  }catch(e){}
+  endSocial();SOC.profile=null;LS.set('pass',null);try{await S.fs.AU.signOut(S.fs.auth);}catch(e){}S.fs.uid=null;closeSheet();updateMeBtn();toast('Trip ended. Your pass and messages are deleted.');
+}
+
+/* ---------- chat ---------- */
+function chatTabs(cur){const n=SOC.dms.filter(t=>(t.lastAt||0)>(SOC.dmRead[t.id]||0)&&t.lastBy!==S.fs.uid).length;
+  return el('div',{class:'seg',role:'tablist'},...[['park','Park chat'],['dms',`Messages${n?` (${n})`:''}`],['people','People']].map(([k,l])=>el('button',{type:'button',role:'tab','aria-selected':String(k===cur),class:k===cur?'on':'',onclick:()=>openChat(k),text:l})));}
+function drivingLocked(){const g=S.gps;return !SOC.passenger&&g.ok&&!g.sim&&Date.now()-g.t<15e3&&(g.speed||0)*3.6>10;}
+function composer(onSend){
+  const inp=el('input',{class:'chatin',type:'text',maxlength:'500',placeholder:'Message',enterkeyhint:'send','aria-label':'Message'});
+  const send=el('button',{class:'sendbtn',type:'button','aria-label':'Send',text:'➤'});
+  const lock=el('div',{class:'drivelock'},el('span',{text:'Typing is paused while the car is moving.'}),el('button',{type:'button',onclick:()=>{SOC.passenger=true;bar.replaceWith(composer(onSend));},text:"I'm a passenger"}));
+  const go=()=>{const t=inp.value.trim();if(!t)return;onSend(t);inp.value='';};
+  send.onclick=go;inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();go();}};
+  const quick=el('div',{class:'quick'},...QUICK.map(q=>el('button',{type:'button',onclick:()=>onSend(q),text:q})));
+  const bar=el('div',{class:'composer'},quick,drivingLocked()?lock:el('div',{class:'inrow'},inp,send));
+  return bar;
+}
+function msgNode(m,uid){
+  const mine=m.uid===uid;const kids=[];
+  if(!mine)kids.push(el('div',{class:'who'},`${m.emoji} ${m.name}`,m.vehicle?el('span',{text:' · '+m.vehicle}):null));
+  if(m.text)kids.push(el('div',{class:'txt',text:m.text}));
+  if(m.rep){const r=m.rep;const q=merc(r.lon,r.lat);kids.push(el('button',{type:'button',class:'repcard',onclick:()=>{const live=allReports().find(x=>x.id===r.id);if(live)openReportView(live);else previewRoute({x:q[0],y:q[1],name:r.label});}},
+      r.kind==='animal'?pic(r.type,36):el('span',{text:'⚠️'}),el('span',null,el('b',{text:r.label}),el('small',{text:`${whereText(q[0],q[1])} · seen ${hhmm(r.at)}`}))));}
+  kids.push(el('div',{class:'when',text:hhmm(m.at)}));
+  return el('div',{class:'msg'+(mine?' me':'')},...kids);
+}
+function openChat(tab='park'){
+  if(!passValid()||!S.fs||!S.fs.uid){openPass();return;}
+  if(!SOC.profile.chat){showPass();return;}
+  const uid=S.fs.uid;
+  if(tab==='park'){
+    const list=el('div',{class:'msgs',role:'log','aria-live':'polite'});
+    SOC.render=()=>{const atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<80;const ms=SOC.chat.filter(m=>!SOC.blocked.includes(m.uid));
+      list.replaceChildren(...(ms.length?ms.map(m=>msgNode(m,uid)):[el('p',{class:'empty',text:'No messages in the last 24 hours. Say hello or share a sighting.'})]));
+      if(atBottom||!list.dataset.init){list.scrollTop=list.scrollHeight;list.dataset.init='1';}
+      SOC.lastRead=Date.now();LS.set('chatRead',SOC.lastRead);updateChatBadge();};
+    openSheet('Chat',[chatTabs('park'),list,composer(t=>sendChat(t))],{view:'chat:park',tall:true});SOC.render();
+  } else if(tab==='dms'){
+    SOC.render=()=>{const rows=SOC.dms.slice().sort((a,b)=>(b.lastAt||0)-(a.lastAt||0)).map(t=>{const other=t.members.find(x=>x!==uid);const p=personByUid(other);const nm=(t.names&&t.names[other])||(p&&p.name)||'Driver';
+        const unread=(t.lastAt||0)>(SOC.dmRead[t.id]||0)&&t.lastBy!==uid;
+        return el('li',null,el('button',{type:'button',onclick:()=>openThread(other,nm)},el('span',{class:'em',text:p?p.emoji:'🙂'}),el('span',null,el('b',{text:nm+(unread?' •':'')}),el('small',{text:(t.last||'').slice(0,60)})),el('span',{class:'r',text:t.lastAt?hhmm(t.lastAt):''})));});
+      $('sheetBody').replaceChildren(chatTabs('dms'),rows.length?el('ul',{class:'list'},...rows):el('p',{class:'empty',text:'No private messages. Open People to message a driver.'}));};
+    openSheet('Chat',[],{view:'chat:dms',tall:true});SOC.render();
+  } else {
+    SOC.render=()=>{const ppl=SOC.people.filter(p=>p.chat&&Date.now()-p.lastSeen<12*3600e3).sort((a,b)=>(a.uid===uid?-1:b.uid===uid?1:b.lastSeen-a.lastSeen));
+      $('sheetBody').replaceChildren(chatTabs('people'),el('p',{class:'hint',text:`${ppl.length} driver${ppl.length===1?'':'s'} with a trip pass active in the last 12 hours.`}),
+        el('ul',{class:'list'},...ppl.map(p=>{const me=p.uid===uid,bl=SOC.blocked.includes(p.uid);return el('li',null,el('button',{type:'button',disabled:me,onclick:()=>openPerson(p)},el('span',{class:'em',text:p.emoji}),el('span',null,el('b',{text:p.name+(me?' (you)':'')+(bl?' · blocked':'')}),el('small',{text:vehLabel(p)+(p.party?' · '+p.party:'')})),el('span',{class:'r',text:Date.now()-p.lastSeen<15*60e3?'active':ago(p.lastSeen)})));})));};
+    openSheet('Chat',[],{view:'chat:people',tall:true});SOC.render();
+  }
+}
+function openPerson(p){const bl=SOC.blocked.includes(p.uid);
+  openSheet(p.name,[el('div',{class:'passcard'},el('span',{class:'av',text:p.emoji}),el('div',null,el('b',{text:p.name}),el('span',{text:vehLabel(p)}),p.party?el('span',{text:p.party}):null),el('small',{text:`Active ${ago(p.lastSeen)}`})),
+    bl?null:el('button',{class:'primary blue',type:'button',onclick:()=>openThread(p.uid,p.name),text:'Send a private message'}),
+    el('button',{class:'secondary'+(bl?'':' no'),type:'button',onclick:()=>{SOC.blocked=bl?SOC.blocked.filter(x=>x!==p.uid):[...SOC.blocked,p.uid];LS.set('blocked',SOC.blocked);toast(bl?'Unblocked.':`You won't see messages from ${p.name} any more.`);openChat('people');},text:bl?'Unblock':'Block this driver'})],{view:'person',back:()=>openChat('people')});}
+async function sendChat(text,rep){
+  if(!passValid()||!S.fs||!S.fs.uid)return openPass();const {F,db}=S.fs,p=SOC.profile;const now=Date.now();
+  const m={uid:S.fs.uid,name:p.name,emoji:p.emoji,vehicle:vehLabel(p),text:(text||'').slice(0,500),at:now,expiresAt:F.Timestamp.fromMillis(now+24*3600e3),kind:rep?'sighting':'text'};
+  if(rep)m.rep={id:rep.id,type:rep.type,kind:rep.kind,label:label(rep),lat:rep.lat,lon:rep.lon,at:rep.lastSeen||rep.at};
+  F.addDoc(F.collection(db,'chat'),m).catch(e=>toast(e&&e.code==='permission-denied'?'The chat rules are not published yet (see README).':'Message not sent: '+(e&&e.code||'error')));
+}
+function shareToChat(r){if(!passValid()){toast('Create a trip pass to use the chat.','Trip pass',openPass);return;}if(!SOC.profile.chat){togglePassChat(true);return;}
+  sendChat(r.kind==='animal'?`${label(r)} here`:`${RD[r.type][1]} here`,r);toast('Shared in the park chat.','Open chat',()=>openChat('park'));}
+async function openThread(other,name){
+  const {F,db}=S.fs,uid=S.fs.uid,pid=pairId(uid,other);
+  try{await F.setDoc(F.doc(db,'dms',pid),{members:[uid,other].sort(),names:{[uid]:SOC.profile.name,[other]:name},expiresAt:F.Timestamp.fromMillis(Date.now()+4*864e5)},{merge:true});}
+  catch(e){toast(e&&e.code==='permission-denied'?'The chat rules are not published yet (see README).':'Could not open the conversation.');return;}
+  if(SOC.threadUnsub)SOC.threadUnsub();SOC.threadMsgs=[];
+  const list=el('div',{class:'msgs',role:'log','aria-live':'polite'});
+  SOC.render=()=>{const atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<80;
+    list.replaceChildren(...(SOC.threadMsgs.length?SOC.threadMsgs.map(m=>msgNode({...m,name:name,emoji:(personByUid(m.uid)||{}).emoji||'🙂',vehicle:''},uid)):[el('p',{class:'empty',text:`Private conversation with ${name}. Messages are deleted after 4 days.`})]));
+    if(atBottom||!list.dataset.init){list.scrollTop=list.scrollHeight;list.dataset.init='1';}
+    SOC.dmRead[pid]=Date.now();LS.set('dmRead',SOC.dmRead);updateChatBadge();};
+  SOC.threadUnsub=F.onSnapshot(F.query(F.collection(db,'dms',pid,'msgs'),F.orderBy('at'),F.limit(200)),snap=>{SOC.threadMsgs=snap.docs.map(d=>{const x=d.data();return (x&&typeof x.text==='string'&&+x.at>1.6e12)?{id:d.id,uid:String(x.uid),text:x.text.slice(0,500),at:+x.at,kind:'text'}:null;}).filter(Boolean);if(sheetView==='thread:'+pid)SOC.render();},e=>{});
+  openSheet(name,[list,composer(async t=>{const now=Date.now();try{await F.addDoc(F.collection(db,'dms',pid,'msgs'),{uid,text:t.slice(0,500),at:now,expiresAt:F.Timestamp.fromMillis(now+4*864e5)});
+      await F.updateDoc(F.doc(db,'dms',pid),{last:t.slice(0,80),lastAt:now,lastBy:uid,expiresAt:F.Timestamp.fromMillis(now+4*864e5)});}catch(e){toast('Message not sent.');}})],{view:'thread:'+pid,tall:true,back:()=>{if(SOC.threadUnsub){SOC.threadUnsub();SOC.threadUnsub=null;}openChat('dms');}});
+  SOC.render();
+}
+
+/* =========================================================================
    12. Weather sheet, settings
    ========================================================================= */
 function openWeather(){
@@ -1097,7 +1303,7 @@ function openSettings(){
     el('p',{class:'fine',text:'Junction stones, ranger posts and fence houses: from the park board, accurate to about 1 km. Satellite: Esri World Imagery. Weather: Open-Meteo.'})];
   openSheet('Settings',nodes,{view:'settings'});
 }
-$('setBtn').onclick=openSettings;$('syncPill').onclick=openSettings;
+$('setBtn').onclick=openSettings;$('meBtn').onclick=()=>openPass();$('chatBtn').onclick=()=>passValid()?openChat(SOC.profile.chat?'park':'park'):openPass();$('syncPill').onclick=openSettings;
 $('reportBtn').onclick=()=>startReport();$('findBtn').onclick=()=>openFind();$('goBtn').onclick=openGo;
 
 /* =========================================================================
@@ -1110,10 +1316,10 @@ async function boot(){
   buildData();
   new ResizeObserver(()=>resize()).observe(cv);resize();fitPark();
   if(document.fonts&&document.fonts.ready)document.fonts.ready.then(redraw);
-  updateWxPill();setSync();updateGpsLine();updateCount();setSat(!!S.set.sat);
+  updateWxPill();setSync();updateGpsLine();updateCount();setSat(!!S.set.sat);updateMeBtn();updateChatBadge();
   startGPS();loadWeather();initSharing();loadPhotos();
   window.addEventListener('online',loadPhotos);
-  setInterval(()=>{loadWeather();redraw();updateGpsLine();},60e3);
+  setInterval(()=>{loadWeather();redraw();updateGpsLine();if(SOC.profile&&!passValid()){endSocial();SOC.profile=null;LS.set('pass',null);toast('Your trip pass has ended and was deleted.');}},60e3);
   window.addEventListener('online',()=>loadWeather(true));
   // follow GPS in browse mode
   setInterval(()=>{if(!S.nav&&S.follow){const p=myPos();if(p&&p.gps){cam.cx=p.x;cam.cy=p.y;redraw();}}},1000);
