@@ -44,7 +44,7 @@ const LS = {get(k,d){try{const v=localStorage.getItem('akl2_'+k);return v==null?
 function el(tag,attrs,...kids){const e=document.createElement(tag);if(attrs)for(const k in attrs){const v=attrs[k];if(v==null||v===false)continue;if(k==='class')e.className=v;else if(k.startsWith('on'))e.addEventListener(k.slice(2),v);else if(k==='text')e.textContent=v;else e.setAttribute(k,v===true?'':v);}for(const c of kids){if(c==null||c===false)continue;e.append(c instanceof Node?c:document.createTextNode(String(c)));}return e;}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const fmtD=m=>m<950?`${Math.max(10,Math.round(m/(m<200?10:50))*(m<200?10:50))} m`:`${(m/1000).toFixed(m<9500?1:0)} km`;
-const fmtDur=s=>{const m=Math.round(s/60);if(m<60)return `${Math.max(1,m)} min`;return `${Math.floor(m/60)} h ${String(m%60).padStart(2,'0')}`;};
+const fmtDur=s=>{const m=Math.round(s/60);if(m<60)return `${Math.max(1,m)} min`;return `${Math.floor(m/60)} h ${String(m%60).padStart(2,'0')} min`;};
 const hhmm=t=>new Date(t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',hour12:false});
 function dayWord(t){const d=new Date(t),n=new Date();const a=new Date(d.getFullYear(),d.getMonth(),d.getDate()),b=new Date(n.getFullYear(),n.getMonth(),n.getDate());const diff=Math.round((b-a)/864e5);if(diff===0)return 'today';if(diff===1)return 'yesterday';if(diff===-1)return 'tomorrow';return d.toLocaleDateString([], {weekday:'short',day:'numeric',month:'short'});}
 function ago(t){const m=Math.round((Date.now()-t)/60000);if(m<1)return 'just now';if(m<60)return `${m} min ago`;const h=Math.floor(m/60);if(h<24)return `${h} h ${m%60?String(m%60).padStart(2,'0')+' min ':''}ago`;return `${Math.round(h/24)} d ago`;}
@@ -72,7 +72,7 @@ const S = {
   live:[], local: LS.get('local', []), sync:'local', fs:null,
   wx: LS.get('wx', null),
   route:null, nav:null,
-  set: Object.assign({voice:true, tilt:true, wake:true, sat:false, hideEx:false}, LS.get('settings', {})),
+  set: Object.assign({voice:true, tilt:true, wake:true, sat:false, hideEx:false, speedWarn:true}, LS.get('settings', {})),
   device: LS.get('dev', null) || (()=>{const d='d'+Math.random().toString(36).slice(2,10);LS.set('dev',d);return d;})(),
   sim:null, follow:true, view:'browse'
 };
@@ -159,12 +159,14 @@ function buildGraph(){
     pairs.sort((p,q)=>p[0]-q[0]);for(const [d,i,j] of pairs){if(f(i)!==f(j)){par[f(i)]=f(j);ways.push({n:[i,j],h:'track',nm:'',o:false,link:true});}}
   }
   const N=X.length, adj=Array.from({length:N},()=>[]), segs=[];
+  // routes stay inside the park: only roads whose both ends are inside the boundary
+  const inside=makeInside(), inN=new Uint8Array(N);for(let i=0;i<N;i++)inN[i]=(O&&O.ways&&O.ways.length>20)?inside(X[i],Y[i]):1;
   for(let wi=0;wi<ways.length;wi++){const w=ways[wi];
     let sx=0,sy=0;for(const i of w.n){sx+=X[i];sy+=Y[i];}const inPark=inRing(sx/w.n.length,sy/w.n.length,S.park);
     let v={motorway:80,trunk:70,primary:60,secondary:50,tertiary:40,unclassified:30,residential:25,living_street:15,service:15,road:25,track:20}[w.h]||20;
     if(w.h==='track'){v={grade1:28,grade2:24,grade3:20,grade4:14,grade5:10}[w.t]||20;}
     if(inPark){v=MAJOR.has(w.h)?35:w.h==='track'?Math.min(v,18):Math.min(v,28);if(w.h==='track'&&w.t==='grade1')v=25;} w.v=v/3.6; w.inPark=inPark;
-    for(let k=0;k+1<w.n.length;k++){const a=w.n[k],b=w.n[k+1];if(a===b)continue;const len=gd(X[a],Y[a],X[b],Y[b]);const si=segs.length;segs.push([a,b,wi,len]);adj[a].push([b,si,wi]);if(!w.o)adj[b].push([a,si,wi]);}
+    for(let k=0;k+1<w.n.length;k++){const a=w.n[k],b=w.n[k+1];if(a===b||!inN[a]||!inN[b])continue;const len=gd(X[a],Y[a],X[b],Y[b]);const si=segs.length;segs.push([a,b,wi,len]);adj[a].push([b,si,wi]);if(!w.o)adj[b].push([a,si,wi]);}
   }
   const deg=new Uint8Array(N);for(let i=0;i<N;i++){deg[i]=new Set(adj[i].map(e=>e[0])).size;}
   // reverse adjacency for one-way ends counts (degree of incoming links)
@@ -175,6 +177,14 @@ function buildGraph(){
   for(let si=0;si<segs.length;si++){const [a,b]=segs[si];const x0=Math.floor(Math.min(X[a],X[b])/C),x1=Math.floor(Math.max(X[a],X[b])/C),y0=Math.floor(Math.min(Y[a],Y[b])/C),y1=Math.floor(Math.max(Y[a],Y[b])/C);
     for(let gx=x0;gx<=x1;gx++)for(let gy=y0;gy<=y1;gy++){const k=gx+','+gy;let l=grid.get(k);if(!l){l=[];grid.set(k,l);}l.push(si);}}
   S.grid={C,grid};
+}
+function makeInside(){
+  const R=S.park;let x0=1e18,y0=1e18,x1=-1e18,y1=-1e18;for(const q of R){x0=Math.min(x0,q[0]);y0=Math.min(y0,q[1]);x1=Math.max(x1,q[0]);y1=Math.max(y1,q[1]);}
+  const C=700,nx=Math.ceil((x1-x0)/C)+1,ny=Math.ceil((y1-y0)/C)+1,cell=new Int8Array(nx*ny);
+  for(let j=0;j<ny;j++)for(let i=0;i<nx;i++)cell[j*nx+i]=inRing(x0+(i+.5)*C,y0+(j+.5)*C,R)?1:0;
+  const edge=new Uint8Array(nx*ny);
+  for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const v=cell[j*nx+i];for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){const a=i+di,b=j+dj;const w=(a<0||b<0||a>=nx||b>=ny)?0:cell[b*nx+a];if(w!==v)edge[j*nx+i]=1;}}
+  return (x,y)=>{const i=Math.floor((x-x0)/C),j=Math.floor((y-y0)/C);if(i<0||j<0||i>=nx||j>=ny)return 0;const k=j*nx+i;return edge[k]?(inRing(x,y,R)?1:0):cell[k];};
 }
 function segsNear(x,y,r){const {C,grid}=S.grid;const out=new Set();const x0=Math.floor((x-r)/C),x1=Math.floor((x+r)/C),y0=Math.floor((y-r)/C),y1=Math.floor((y+r)/C);for(let gx=x0;gx<=x1;gx++)for(let gy=y0;gy<=y1;gy++){const l=grid.get(gx+','+gy);if(l)for(const s of l)out.add(s);}return out;}
 function projSeg(px,py,ax,ay,bx,by){const dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy;let t=L?((px-ax)*dx+(py-ay)*dy)/L:0;t=clamp(t,0,1);const qx=ax+t*dx,qy=ay+t*dy;return {t,qx,qy,d:gd(px,py,qx,qy)};}
@@ -194,10 +204,10 @@ function penalties(){
   const wet=wetness(); const wf=1+Math.min(0.6,wet/30);
   return {pen,reasons,wf};
 }
-function route(fromX,fromY,toX,toY,destName){
-  const G=S.graph;const s0=snap(fromX,fromY,6000), s1=snap(toX,toY,6000);
+function route(fromX,fromY,toX,toY,destName,opt={}){
+  const G=S.graph;const s0=opt.s0||snap(fromX,fromY,15000), s1=opt.s1||snap(toX,toY,8000);
   if(!s0||!s1)return {error:'far',s0,s1};
-  const {pen,reasons,wf}=penalties();
+  const {pen,reasons,wf}=opt.pp||penalties();
   const cost=(si,wi)=>{const w=G.ways[wi];const len=G.segs[si][3];let c=len/w.v;if(w.h==='track')c*=wf;const p=pen.get(si);if(p)c*=p;return c;};
   const vmax=60/3.6;
   const gS=new Float64Array(G.N).fill(Infinity),prev=new Int32Array(G.N).fill(-1),prevSeg=new Int32Array(G.N).fill(-1);
@@ -216,12 +226,36 @@ function route(fromX,fromY,toX,toY,destName){
     if(endExtra.has(u)){const c=gS[u]+endExtra.get(u);if(c<best){best=c;bestNode=u;}}
     for(const [v,si,wi] of G.adj[u]){const c=cost(si,wi);if(c===Infinity)continue;const ng=gS[u]+c;if(ng<gS[v]){gS[v]=ng;prev[v]=u;prevSeg[v]=si;heap.push(ng+h(v),v);}}}
   if(best===Infinity)return {error:'none'};
+  if(opt.costOnly)return {cost:best};
   const pts=[[s0.qx,s0.qy]];const segIdx=[];const nodes=[];
   if(bestNode!==-2){const chain=[];let u=bestNode;while(u!==-1){chain.push(u);u=prev[u];}chain.reverse();
     for(const u of chain){pts.push([G.X[u],G.Y[u]]);nodes.push(u);}
   }
   pts.push([s1.qx,s1.qy]);
-  return buildRoute(pts,nodes,{pen,reasons},destName,best,[toX,toY]);
+  const r=buildRoute(pts,nodes,{pen,reasons},destName,best,[toX,toY]);r.startOff=s0.d;r.endOff=s1.d;r.start=[s0.qx,s0.qy];return r;
+}
+/* several stops in a fixed order, joined into one route */
+function routeMulti(from,stops){
+  const pp=penalties();const legs=[];let cx=from.x,cy=from.y;
+  for(const st of stops){const r=route(cx,cy,st.x,st.y,st.name,{pp});if(r.error)return {...r,stop:st};legs.push(r);const e=r.pts[r.pts.length-1];cx=e[0];cy=e[1];}
+  if(legs.length===1){legs[0].stops=[{...stops[0],d:legs[0].len}];return legs[0];}
+  const pts=[],cum=[],instr=[],warn=[],sights=[],via=[],wps=[];let off=0,time=0,ioff=0;
+  legs.forEach((L,k)=>{const skip=k?1:0;for(let i=skip;i<L.pts.length;i++){pts.push(L.pts[i]);cum.push(L.cum[i]+off);}
+    for(const s of L.instr){const o={...s,i:s.i+ioff,d:s.d+off};if(s.type==='arrive'&&k<legs.length-1){o.type='waypoint';o.stop=k+1;o.name=stops[k].name;}if(s.type==='arrive'&&k===legs.length-1){o.stop=k+1;o.name=stops[k].name;}instr.push(o);}
+    wps.push({...stops[k],d:L.len+off});
+    for(const w of L.warn)if(!warn.includes(w))warn.push(w);for(const w of L.sights)if(!sights.includes(w))sights.push(w);for(const v of L.via)if(!via.includes(v))via.push(v);
+    off+=L.len;time+=L.time;ioff=pts.length-1;});
+  return {pts,cum,len:off,time,tpm:time/Math.max(1,off),instr,warn,sights,via:via.slice(0,3),destName:stops[stops.length-1].name,dest:[stops[stops.length-1].x,stops[stops.length-1].y],stops:wps,startOff:legs[0].startOff,endOff:legs[legs.length-1].endOff,start:legs[0].start};
+}
+/* best visiting order for up to 6 stops (open path from the car) */
+function bestOrder(from,stops){
+  const pts=[from,...stops],n=pts.length,pp=penalties();const sn=pts.map((p,i)=>snap(p.x,p.y,i?8000:15000));
+  if(sn.some(x=>!x))return null;
+  const T=Array.from({length:n},()=>new Array(n).fill(Infinity));
+  for(let i=0;i<n;i++)for(let j=1;j<n;j++){if(i===j)continue;const r=route(pts[i].x,pts[i].y,pts[j].x,pts[j].y,'',{pp,costOnly:true,s0:sn[i],s1:sn[j]});T[i][j]=r.error?Infinity:r.cost;}
+  let best=null,bc=Infinity;const idx=stops.map((_,i)=>i+1);
+  const perm=(a,l)=>{if(l===a.length){let c=0,p=0;for(const q of a){c+=T[p][q];p=q;if(c>=bc)return;}if(c<bc){bc=c;best=a.slice();}return;}for(let i=l;i<a.length;i++){[a[l],a[i]]=[a[i],a[l]];perm(a,l+1);[a[l],a[i]]=[a[i],a[l]];}};
+  perm(idx,0);return best?best.map(i=>stops[i-1]):null;
 }
 function buildRoute(pts,nodes,pp,destName,costS,dest){
   const G=S.graph;
@@ -261,6 +295,7 @@ function buildRoute(pts,nodes,pp,destName,costS,dest){
 }
 function nextWay(u,v){if(v==null||v<0)return null;for(const e of S.graph.adj[u])if(e[0]===v)return e[2];return null;}
 function instrText(s,withRoad=true){
+  if(s.type==='waypoint')return `Stop ${s.stop}: ${s.name}`;
   const m={'left':'Turn left','right':'Turn right','slight-left':'Bear left','slight-right':'Bear right','sharp-left':'Sharp left','sharp-right':'Sharp right','keep-left':'Keep left','keep-right':'Keep right','straight':'Go straight on','arrive':'Arrive','depart':'Head off'}[s.type]||'Continue';
   const base=withRoad&&s.road?`${m} onto ${s.road}`:m;return s.j&&withRoad?`At junction ${s.j}: ${base.charAt(0).toLowerCase()+base.slice(1)}`:base;
 }
@@ -414,10 +449,11 @@ S.life=LS.get('life',{});
 const LISTED=window.SPECIES;
 function tick(id,how){const sp=SPX[id];if(!sp)return null;const had=S.life[id];
   if(had&&(had.how==='report'||how!=='report'))return null;
-  S.life[id]={t:had?had.t:Date.now(),how};LS.set('life',S.life);
+  S.life[id]={t:had?had.t:Date.now(),how};LS.set('life',S.life);updateCount();
   const before=earnedBadges().map(b=>b.id);setTimeout(()=>{const nb=earnedBadges().filter(b=>!before.includes(b.id));for(const b of nb)setTimeout(()=>toast(`Badge earned: ${b.icon} ${b.name} +${b.bonus} points`),5200);},10);
   return had?null:(POINTS[sp.rarity]||0);}
-function untick(id){delete S.life[id];LS.set('life',S.life);}
+function untick(id){delete S.life[id];LS.set('life',S.life);updateCount();}
+function updateCount(){const c=$('lifeCount');if(c)c.textContent=`${LISTED.filter(x=>has(x.id)).length}/${LISTED.length}`;}
 const has=id=>!!S.life[id];
 function earnedBadges(){return window.BADGES.filter(b=>b.need.every(group=>group.some(has)));}
 function score(){let pts=0,n=0;for(const x of LISTED){if(has(x.id)){pts+=POINTS[x.rarity]||0;n++;}}const badges=earnedBadges();for(const b of badges)pts+=b.bonus;
@@ -442,7 +478,15 @@ function onFix(c,sim){
   if(!lastFix||gd(lastFix.x,lastFix.y,x,y)>8)lastFix={x,y};
   Object.assign(g,{ok:true,denied:false,x,y,lat:c.latitude,lon:c.longitude,acc:c.accuracy||20,heading,speed:c.speed!=null&&!isNaN(c.speed)?c.speed:g.speed,t:Date.now(),sim:!!sim});
   if(S.nav)navUpdate();
-  updateGpsLine();redraw();
+  updateSpeed();updateGpsLine();redraw();
+}
+let lastSpeedWarn=0;
+function updateSpeed(){
+  const g=S.gps,b=$('speedBox');const fresh=g.ok&&Date.now()-g.t<10e3;const kmh=fresh?Math.round((g.speed||0)*3.6):0;
+  const show=S.nav||(fresh&&kmh>=5&&!S.preview);b.hidden=!show;if(!show)return;
+  $('speedVal').textContent=kmh;const inPark=inRing(g.x,g.y,S.park);
+  const over=S.set.speedWarn&&inPark&&kmh>40;b.classList.toggle('over',over);
+  if(over&&Date.now()-lastSpeedWarn>90e3){lastSpeedWarn=Date.now();say(`Slow down. The speed limit is 40.`);try{navigator.vibrate&&navigator.vibrate([200,100,200]);}catch(e){}toast(`Slow down: ${kmh} km/h. The park limit is 40.`);}
 }
 function startGPS(){
   if(!('geolocation' in navigator)){S.gps.denied=true;updateGpsLine();return;}
@@ -487,7 +531,7 @@ let dpr=1,W=0,H=0;
 const cam={cx:0,cy:0,s:0.01,rot:0,ax:0.5,ay:0.5};          // world centre, px per metre, rotation (rad), anchor (fraction of canvas)
 const camT={...cam};                                       // target for smooth nav camera
 let need=false,hits=[],placed=[],selected=null,pickMode=null,anim=false;
-function resize(){dpr=Math.min(window.devicePixelRatio||1,S.nav&&S.set.tilt?1.5:2.5);const r=cv.getBoundingClientRect();W=r.width;H=r.height;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);redraw();}
+function resize(){dpr=Math.min(window.devicePixelRatio||1,(S.nav||S.preview)&&S.set.tilt?1.5:2.5);W=cv.clientWidth;H=cv.clientHeight;if(!W||!H)return;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);redraw();}
 function redraw(){if(!need&&!anim){need=true;requestAnimationFrame(draw);}}
 function M(){const c=Math.cos(cam.rot),s=Math.sin(cam.rot),k=cam.s;const a=k*c,b=k*s,cc=-k*s,d=k*c;const ax=cam.ax*W,ay=cam.ay*H;return {a,b,c:cc,d,e:ax-(a*cam.cx+cc*cam.cy),f:ay-(b*cam.cx+d*cam.cy)};}
 function w2s(x,y,m=M()){return [m.a*x+m.c*y+m.e,m.b*x+m.d*y+m.f];}
@@ -575,13 +619,20 @@ function draw(){
   const R=S.route;
   if(R){const p=new Path2D();R.pts.forEach((q,i)=>i?p.lineTo(q[0],q[1]):p.moveTo(q[0],q[1]));
     ctx.strokeStyle='#0B3D75';ctx.lineWidth=(S.nav?18:10)*px;ctx.stroke(p);ctx.strokeStyle='#2F86E6';ctx.lineWidth=(S.nav?13:7)*px;ctx.stroke(p);
+    if(S.preview){const st=R.instr[S.preview.i],d0=S.preview.i?R.instr[S.preview.i-1].d:0;
+      const seg=new Path2D();let f=true;for(let i=0;i<R.pts.length;i++){if(R.cum[i]<d0||R.cum[i]>st.d)continue;f?seg.moveTo(R.pts[i][0],R.pts[i][1]):seg.lineTo(R.pts[i][0],R.pts[i][1]);f=false;}
+      const a0=pointAt(R,d0);if(!f){seg.lineTo(R.pts[st.i][0],R.pts[st.i][1]);}ctx.strokeStyle='#00B4FF';ctx.lineWidth=11*px;ctx.stroke(seg);
+      if(st.type!=='arrive'&&st.type!=='waypoint'){const ar=new Path2D();const N0=14;for(let k=0;k<=N0;k++){const q=pointAt(R,st.d-55+k*(90/N0));k?ar.lineTo(q[0],q[1]):ar.moveTo(q[0],q[1]);}
+        const tip=pointAt(R,st.d+35),bk=pointAt(R,st.d+20);const ang=Math.atan2(tip[1]-bk[1],tip[0]-bk[0]);
+        ctx.strokeStyle='#123';ctx.lineWidth=17*px;ctx.stroke(ar);ctx.strokeStyle='#fff';ctx.lineWidth=11*px;ctx.stroke(ar);
+        ctx.beginPath();ctx.moveTo(tip[0]+Math.cos(ang)*14*px,tip[1]+Math.sin(ang)*14*px);ctx.lineTo(tip[0]+Math.cos(ang+2.3)*16*px,tip[1]+Math.sin(ang+2.3)*16*px);ctx.lineTo(tip[0]+Math.cos(ang-2.3)*16*px,tip[1]+Math.sin(ang-2.3)*16*px);ctx.closePath();ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=3*px;ctx.strokeStyle='#123';ctx.stroke();}}
     if(S.nav&&S.nav.prog>0){const q=new Path2D();let started=false;for(let i=0;i<R.pts.length&&R.cum[i]<=S.nav.prog;i++){started?q.lineTo(R.pts[i][0],R.pts[i][1]):q.moveTo(R.pts[i][0],R.pts[i][1]);started=true;}const cp=pointAt(R,S.nav.prog);q.lineTo(cp[0],cp[1]);ctx.strokeStyle='#9BA8B5';ctx.lineWidth=9*px;ctx.stroke(q);}}
   // ---- screen space ----
   ctx.setTransform(dpr,0,0,dpr,0,0);placed=[];hits=[];
   const reps=visibleReports().map(r=>{const q=merc(r.lon,r.lat);const s=w2s(q[0],q[1],m);return {r,x:s[0],y:s[1]};}).filter(o=>o.x>-60&&o.y>-60&&o.x<W+60&&o.y<H+60);
   for(const o of reps)placed.push([o.x-22,o.y-28,o.x+46,o.y+40]);
   const pos=myPos();let posS=null;if(pos){posS=w2s(pos.x,pos.y,m);placed.push([posS[0]-16,posS[1]-16,posS[0]+16,posS[1]+16]);}
-  if(R){const d=w2s(R.dest[0],R.dest[1],m);drawFlag(d[0],d[1]);placed.push([d[0]-10,d[1]-40,d[0]+24,d[1]+4]);
+  if(R){const d=w2s(R.pts[R.pts.length-1][0],R.pts[R.pts.length-1][1],m);if(R.stops&&R.stops.length>1){R.stops.forEach((st,k)=>{const q=pointAt(R,st.d);const sp=w2s(q[0],q[1],m);ctx.beginPath();ctx.arc(sp[0],sp[1],13,0,7);ctx.fillStyle='#17663A';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#fff';ctx.stroke();ctx.font='700 14px Barlow,sans-serif';ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(k+1),sp[0],sp[1]+.5);placed.push([sp[0]-14,sp[1]-14,sp[0]+14,sp[1]+14]);});}else{drawFlag(d[0],d[1]);placed.push([d[0]-10,d[1]-40,d[0]+24,d[1]+4]);}
     if(S.nav){const nx=S.nav.next;if(nx&&nx.type!=='arrive'){const q=w2s(R.pts[nx.i][0],R.pts[nx.i][1],m);ctx.beginPath();ctx.arc(q[0],q[1],8,0,7);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle='#0B3D75';ctx.stroke();}}}
   const showJ=cam.s>0.028,showPL=cam.s>0.016,showArea=cam.s>0.011;
   for(const p of S.pois){if(p.cat==='lake'||p.cat==='area'||p.cat==='hill')continue;const [x,y]=w2s(p.x,p.y,m);if(x<-30||y<-30||x>W+30||y>H+30)continue;
@@ -602,7 +653,7 @@ function drawFlag(x,y,col='#17663A'){ctx.save();ctx.lineWidth=3;ctx.strokeStyle=
    9. Gestures (browse mode)
    ========================================================================= */
 const ptrs=new Map();let gst=null;
-cv.addEventListener('pointerdown',e=>{if(S.nav)return;cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.offsetX,y:e.offsetY});
+cv.addEventListener('pointerdown',e=>{if(S.nav||S.preview)return;cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.offsetX,y:e.offsetY});
   if(ptrs.size===1)gst={type:'pan',sx:e.offsetX,sy:e.offsetY,cx:cam.cx,cy:cam.cy,t:Date.now(),moved:false};
   else if(ptrs.size===2){const [a,b]=[...ptrs.values()];gst={type:'pinch',d:Math.hypot(a.x-b.x,a.y-b.y),mx:(a.x+b.x)/2,my:(a.y+b.y)/2,s:cam.s,moved:true};}});
 cv.addEventListener('pointermove',e=>{if(!ptrs.has(e.pointerId)||!gst)return;ptrs.set(e.pointerId,{x:e.offsetX,y:e.offsetY});
@@ -613,7 +664,8 @@ cv.addEventListener('pointerup',endP);cv.addEventListener('pointercancel',e=>{pt
 cv.addEventListener('wheel',e=>{e.preventDefault();if(!S.nav)zoomAt(Math.exp(-e.deltaY*.0015),e.offsetX,e.offsetY);},{passive:false});
 cv.addEventListener('dblclick',e=>{if(!S.nav)zoomAt(1.8,e.offsetX,e.offsetY);});
 $('zin').onclick=()=>zoomAt(1.6,W/2,H/2);$('zout').onclick=()=>zoomAt(1/1.6,W/2,H/2);
-$('layerBtn').onclick=()=>{S.set.sat=!S.set.sat;saveSet();toast(S.set.sat?'Satellite view (needs signal).':'Map view.');redraw();};
+function setSat(v){S.set.sat=v;saveSet();document.querySelectorAll('[data-bg]').forEach(b=>{const on=(b.dataset.bg==='sat')===v;b.classList.toggle('on',on);b.setAttribute('aria-pressed',String(on));});redraw();}
+document.querySelectorAll('[data-bg]').forEach(b=>b.onclick=()=>{setSat(b.dataset.bg==='sat');if(S.set.sat&&!navigator.onLine)toast('Satellite needs signal. Areas you viewed before still show.');});
 $('followBtn').onclick=()=>{const p=myPos();if(!p){openSetPos();return;}S.follow=true;$('followBtn').classList.add('on');centerOn(p.x,p.y,Math.max(cam.s,0.05));};
 let pickPin=null;
 function onTap(x,y){
@@ -634,9 +686,9 @@ function openSheet(title,nodes,o={}){$('sheetTitle').textContent=title;$('sheetB
   const dots=$('sheetDots');dots.replaceChildren();if(o.step){for(let i=1;i<=o.step[1];i++)dots.append(el('i',{class:i<=o.step[0]?'on':''}));}$('sheetBody').scrollTop=0;}
 function closeSheet(){$('sheet').hidden=true;sheetView=null;selected=null;redraw();}
 $('sheetClose').onclick=closeSheet;$('sheetBack').onclick=()=>backFn&&backFn();
-function refreshSheet(){if($('sheet').hidden)return;if(sheetView==='find')openFind('sightings');else if(sheetView==='guide')openFind('guide');else if(sheetView==='list')openFind('list');else if(sheetView&&sheetView.startsWith('species:'))openSpecies(sheetView.slice(8));else if(sheetView&&sheetView.startsWith('rep:')){const r=allReports().find(x=>x.id===sheetView.slice(4));if(r)openReportView(r,true);}}
+function refreshSheet(){if($('sheet').hidden)return;if(sheetView==='findanimals')return;if(sheetView==='find')openFind('sightings');else if(sheetView==='guide')openFind('guide');else if(sheetView==='list')openFind('list');else if(sheetView&&sheetView.startsWith('species:'))openSpecies(sheetView.slice(8));else if(sheetView&&sheetView.startsWith('rep:')){const r=allReports().find(x=>x.id===sheetView.slice(4));if(r)openReportView(r,true);}}
 let toastT=null;
-function toast(t,btn,fn,ms=3600){const e=$('toast');e.replaceChildren(...[el('span',{text:t}),btn?el('button',{type:'button',onclick:()=>{e.hidden=true;fn();},text:btn}):null].filter(Boolean));e.hidden=false;const up=!$('sheet').hidden;e.style.top=up?'calc(12px + env(safe-area-inset-top))':'';e.style.bottom=up?'auto':S.nav?'calc(100px + env(safe-area-inset-bottom))':'';clearTimeout(toastT);toastT=setTimeout(()=>e.hidden=true,ms);}
+function toast(t,btn,fn,ms=3600){const e=$('toast');e.replaceChildren(...[el('span',{text:t}),btn?el('button',{type:'button',onclick:()=>{e.hidden=true;fn();},text:btn}):null].filter(Boolean));e.hidden=false;const up=!$('sheet').hidden;e.style.top=up?'calc(12px + env(safe-area-inset-top))':'';e.style.bottom=up?'auto':S.preview?'calc(150px + env(safe-area-inset-bottom))':S.nav?'calc(100px + env(safe-area-inset-bottom))':'';clearTimeout(toastT);toastT=setTimeout(()=>e.hidden=true,ms);}
 function banner(text,btn,fn,cls){const b=$('banner');b.className='banner'+(cls?' '+cls:'');b.replaceChildren(...[el('p',{text}),btn?el('button',{type:'button',onclick:fn,text:btn}):null].filter(Boolean));b.hidden=false;}
 function hideBanner(){$('banner').hidden=true;}
 function startPick(kind){pickMode=kind;$('sheet').hidden=true;banner(kind==='me'?'Tap the map where you are.':'Tap the map where you want to go.','Cancel',()=>endPick());}
@@ -736,7 +788,7 @@ function openFind(tab){
       el('span',{class:'r'},rel?fmtD(rel.d):'',rel?el('small',{text:rel.dir}):'')));};
   const winSel=el('select',{class:'opt',id:'winSel','aria-label':'How far back to show'},...[[2,'Last 2 h'],[6,'Last 6 h'],[12,'Last 12 h'],[48,'Last 2 days']].map(([v,t])=>{const o=el('option',{value:String(v),text:t});if((S.animalWin||6)===v)o.selected=true;return o;}));
   winSel.onchange=()=>{S.animalWin=+winSel.value;LS.set('win',S.animalWin);openFind();redraw();};
-  const nodes=[tabs('sightings'),el('div',{class:'acts'},winSel),el('p',{class:'lbl',text:'Latest sightings'}),
+  const nodes=[tabs('sightings'),el('button',{class:'primary blue',type:'button',onclick:()=>openFindAnimals(),text:'🔍 Find animals and plan a route'}),el('div',{class:'acts'},winSel),el('p',{class:'lbl',text:'Latest sightings'}),
     recent.length?el('ul',{class:'list'},...recent.slice(0,15).map(row)):el('p',{class:'hint',text:'No sightings in this time window. Report what you see to help others.'})];
   const last={};for(const r of all){if(Date.now()-r.lastSeen>7*864e5)continue;if(!last[r.type]||r.lastSeen>last[r.type].lastSeen)last[r.type]=r;}
   nodes.push(el('p',{class:'lbl',text:'Last seen, by animal (7 days)'}));
@@ -745,6 +797,44 @@ function openFind(tab){
     const q=merc(r.lon,r.lat);const rel=relTo(q[0],q[1]);
     return el('li',null,el('button',{type:'button',onclick:()=>openReportView(r)},pic(x.id,46),el('span',null,el('b',{text:x.name}),el('small',{text:`Last seen ${hhmm(r.lastSeen)} ${dayWord(r.lastSeen)} (${ago(r.lastSeen)})`})),el('span',{class:'r'},rel?fmtD(rel.d):'',rel?el('small',{text:rel.dir}):'')));})));
   openSheet('Animals',nodes,{view:'find'});
+}
+function freshest(id){
+  const pos=myPos();const match=r=>r.type===id||(id==='rhino'&&r.type.startsWith('rhino'))||((id==='rhino_b'||id==='rhino_w')&&r.type==='rhino');
+  const rs=allReports().filter(r=>r.kind==='animal'&&match(r)&&alive(r)).sort((a,b)=>b.lastSeen-a.lastSeen);if(!rs.length)return null;
+  const top=rs.filter(r=>rs[0].lastSeen-r.lastSeen<20*60e3);if(pos&&top.length>1){top.sort((a,b)=>{const qa=merc(a.lon,a.lat),qb=merc(b.lon,b.lat);return gd(pos.x,pos.y,qa[0],qa[1])-gd(pos.x,pos.y,qb[0],qb[1]);});}
+  return top[0];
+}
+function openFindAnimals(pre){
+  const sel=new Set(pre||[]);const MAX=6;
+  const withS=window.SPECIES.filter(x=>freshest(x.id)),without=window.SPECIES.filter(x=>!freshest(x.id));
+  const go=el('button',{class:'primary blue',type:'button'});
+  const upd=()=>{go.disabled=!sel.size;go.textContent=sel.size?`Find ${sel.size} animal${sel.size>1?'s':''} and plan the route`:'Choose animals to find';};
+  const tile=(x,ok)=>{const r=ok?freshest(x.id):null;const b=el('button',{type:'button',class:'ftile'+(sel.has(x.id)?' on':''),disabled:!ok,'aria-pressed':String(sel.has(x.id))},pic(x.id,52,ok?'':'dim'),el('b',{text:SHORTNAME[x.id]||x.name}),
+      el('small',{text:ok?`${hhmm(r.lastSeen)} · ${ago(r.lastSeen)}${r.example?' · ex.':''}`:'no recent sighting'}),has(x.id)?el('i',{class:'got',text:'✓'}):null);
+    b.onclick=()=>{if(sel.has(x.id))sel.delete(x.id);else{if(sel.size>=MAX){toast(`Up to ${MAX} animals at a time.`);return;}sel.add(x.id);}b.classList.toggle('on',sel.has(x.id));b.setAttribute('aria-pressed',String(sel.has(x.id)));upd();};return b;};
+  const notMine=withS.filter(x=>!has(x.id));
+  go.onclick=()=>planFind([...sel]);upd();
+  openSheet('Find animals',[
+    el('p',{class:'hint',text:'Tick the animals you want to see. The app takes the freshest sighting of each and plans the quickest route through all of them.'}),
+    notMine.length?el('button',{class:'secondary',type:'button',onclick:()=>openFindAnimals(notMine.slice(0,MAX).map(x=>x.id)),text:`Select ones not on my list yet (${Math.min(notMine.length,MAX)})`}):null,
+    el('p',{class:'lbl',text:`Seen recently (${withS.length})`}),withS.length?el('div',{class:'fgrid'},...withS.map(x=>tile(x,true))):el('p',{class:'hint',text:'No recent sightings to route to yet.'}),
+    go,
+    el('details',{class:'rules'},el('summary',{text:`No recent sighting (${without.length})`}),el('div',{class:'fgrid',style:'padding-bottom:10px'},...without.map(x=>tile(x,false))))
+  ],{view:'findanimals',back:()=>openFind('sightings')});
+}
+function planFind(ids){
+  const p=needPos(()=>planFind(ids));if(!p)return;
+  const stops=ids.map(id=>{const r=freshest(id);if(!r)return null;const q=merc(r.lon,r.lat);return {x:q[0],y:q[1],name:label(r),rep:r,id};}).filter(Boolean);
+  if(!stops.length){toast('None of those animals has a recent sighting.');return;}
+  const order=stops.length>1?bestOrder(p,stops):stops;if(!order)return noRoute({error:'far',s0:snap(p.x,p.y,15000)});
+  const r=routeMulti(p,order);if(r.error)return noRoute(r,r.stop);
+  const t0=Date.now();
+  const list=el('ol',{class:'stops'},...r.stops.map((st,k)=>{const arr=t0+st.d*r.tpm*1000;const age=arr-st.rep.lastSeen;
+    return el('li',null,el('span',{class:'sn',text:String(k+1)}),pic(st.rep.type,44),el('span',null,el('b',{text:st.name}),
+      el('small',{text:`Seen ${hhmm(st.rep.lastSeen)} (${ago(st.rep.lastSeen)})${st.rep.example?' · example':''}`}),
+      el('small',{text:`Arrive about ${hhmm(arr)} · sighting will be ${fmtDur(age/1000)} old`})));}));
+  const old=r.stops.some(st=>t0+st.d*r.tpm*1000-st.rep.lastSeen>90*60e3);
+  showPlan(r,`Find ${r.stops.length} animal${r.stops.length>1?'s':''}`,[list,old?el('p',{class:'fine',text:'Animals move on. Sightings older than about an hour and a half are a rough guide only, so look around as you get close.'}):null].filter(Boolean));
 }
 function dangerChip(d){return el('span',{class:'tag',style:`background:${DANGER[d][1]}1F;color:${DANGER[d][1]}`,text:DANGER[d][0]});}
 function rarityDots(r){return el('span',{class:'rar','aria-label':RARITY[r]},'●'.repeat(r)+'○'.repeat(4-r));}
@@ -792,7 +882,7 @@ function openList(){
     nodes.push(el('ul',{class:'list check'},...xs.map(x=>{const t=S.life[x.id];return el('li',{class:t?'done':''},el('button',{type:'button',onclick:()=>openSpecies(x.id)},pic(x.id,46,t?'':'dim'),
       el('span',null,el('b',{text:x.name}),el('small',{text:t?`${t.how==='report'?'Reported':'Seen'} ${hhmm(t.t)} ${dayWord(t.t)}`:`${RARITY[x.rarity]} · ${POINTS[x.rarity]} points`})),
       el('span',{class:'tickbox','aria-label':t?'Ticked':'Not ticked',text:t?'✓':''})));})));}
-  nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>{openSheet('Start a new trip?',[el('p',{class:'hint',text:'This clears all ticks and badges on this phone so you can start a fresh list.'}),el('button',{class:'primary',type:'button',onclick:()=>{S.life={};LS.set('life',S.life);openFind('list');toast('New trip started.');},text:'Clear my list'}),el('button',{class:'secondary',type:'button',onclick:()=>openFind('list'),text:'Keep my list'})],{view:'reset'});},text:'Start a new trip'}));
+  nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>{openSheet('Start a new trip?',[el('p',{class:'hint',text:'This clears all ticks and badges on this phone so you can start a fresh list.'}),el('button',{class:'primary',type:'button',onclick:()=>{S.life={};LS.set('life',S.life);updateCount();openFind('list');toast('New trip started.');},text:'Clear my list'}),el('button',{class:'secondary',type:'button',onclick:()=>openFind('list'),text:'Keep my list'})],{view:'reset'});},text:'Start a new trip'}));
   nodes.push(el('p',{class:'fine',text:'Animals you report are ticked automatically. You can also tick an animal you saw without reporting it. Your list stays on this phone.'}));
   openSheet('Animals',nodes,{view:'list'});
 }
@@ -836,11 +926,11 @@ function openGo(){
   const render=()=>{const s=q.value.trim().toLowerCase();box.replaceChildren();
     const p=myPos();
     const item=(name,sub,x,y,em)=>{const rel=p?{d:gd(p.x,p.y,x,y),dir:DIRS[dir8(brg(p.x,p.y,x,y))]}:null;return el('li',null,el('button',{type:'button',onclick:()=>previewRoute({x,y,name})},el('span',{class:'em',text:em}),el('span',null,el('b',{text:name}),sub?el('small',{text:sub}):null),el('span',{class:'r'},rel?fmtD(rel.d):'',rel?el('small',{text:rel.dir}):'')));};
-    if(!s){const sights=visibleReports().filter(r=>r.kind==='animal').sort((a,b)=>b.lastSeen-a.lastSeen).slice(0,4);
+    if(!s){box.append(el('button',{class:'wide',type:'button',onclick:()=>openFindAnimals(),text:'🔍 Find animals: route through several sightings'}));const sights=visibleReports().filter(r=>r.kind==='animal').sort((a,b)=>b.lastSeen-a.lastSeen).slice(0,4);
       if(sights.length){box.append(el('p',{class:'lbl',text:'Latest sightings'}),el('ul',{class:'list'},...sights.map(r=>{const m=merc(r.lon,r.lat);return item(label(r),`Seen ${hhmm(r.lastSeen)} · ${ago(r.lastSeen)}${r.example?' · example':''}`,m[0],m[1],emoji(r));})));}
       box.append(el('button',{class:'wide',type:'button',onclick:()=>startPick('dest'),text:'📍 Pick a spot on the map'}));}
     for(const [title,cats] of groups){let list=S.named.filter(n=>cats.includes(n.cat)).concat(S.pois.filter(n=>cats.includes(n.cat)&&!S.named.includes(n)));
-      list=[...new Map(list.map(n=>[(n.short||n.name),n])).values()];
+      list=[...new Map(list.map(n=>[(n.short||n.name),n])).values()].filter(n=>inRing(n.x,n.y,S.park)||outsideBy(n)<400);
       if(s)list=list.filter(n=>(n.name+' '+(n.short||'')).toLowerCase().includes(s));
       if(!list.length)continue;if(p)list.sort((a,b)=>gd(p.x,p.y,a.x,a.y)-gd(p.x,p.y,b.x,b.y));
       box.append(el('p',{class:'lbl',text:title}),el('ul',{class:'list'},...list.slice(0,s?20:8).map(n=>item(n.short||n.name,'',n.x,n.y,{gate:'🚪',reception:'ℹ️',hq:'🏠',lodge:'🛏️',camp:'⛺',lake:'💧',lookout:'👁️',picnic:'🧺',area:'🌾'}[n.cat]||'📍'))));}
@@ -852,20 +942,27 @@ function openGo(){
 function previewRoute(dest){
   const p=needPos(()=>previewRoute(dest));if(!p)return;
   const r=route(p.x,p.y,dest.x,dest.y,dest.name);
-  if(r.error){
-    const u=unmerc(dest.x,dest.y);
-    openSheet('No route found',[el('p',{class:'hint',text:r.error==='far'?(r.s0?'The destination is too far from any mapped road.':'You are too far from the mapped park roads to plan a route here. Use Google Maps to reach the park, then try again.'):'No drivable route found. A road may be closed by a report.'}),
-      el('a',{class:'secondary',href:`https://www.google.com/maps/dir/?api=1&destination=${u.lat.toFixed(6)},${u.lon.toFixed(6)}`,target:'_blank',rel:'noopener',text:'Open in Google Maps'})],{view:'noroute'});return;}
+  if(r.error)return noRoute(r,dest);
+  showPlan(r,`To ${dest.name}`);
+}
+function noRoute(r,dest){
+  const u=dest?unmerc(dest.x,dest.y):null;
+  openSheet('No route found',[el('p',{class:'hint',text:r.error==='far'?(!r.s0?'You are too far from the park roads to plan a route. Routes only use roads inside Akagera. Use Google Maps to reach a gate, then try again.':'That place is too far from any road inside the park.'):'No drivable route inside the park. A road may be closed by a report.'}),
+    el('a',{class:'secondary',href:'https://www.google.com/maps/dir/?api=1&destination=-1.899116,30.681779',target:'_blank',rel:'noopener',text:'Google Maps to the south gate'}),
+    u?el('a',{class:'secondary',href:`https://www.google.com/maps/dir/?api=1&destination=${u.lat.toFixed(6)},${u.lon.toFixed(6)}`,target:'_blank',rel:'noopener',text:'Google Maps to the destination'}):null],{view:'noroute'});
+}
+function showPlan(r,title,top=[]){
   S.route=r;S.follow=false;fitRoute(r);
-  const eta=Date.now()+r.time*1000;
-  const nodes=[el('div',{class:'route-card'},el('div',{class:'big',text:`${fmtDur(r.time)} · ${fmtD(r.len)}`}),el('div',{class:'hint',text:`Arrive about ${hhmm(eta)}${r.via.length?` · via ${r.via.join(', ')}`:''}`}),el('div',{class:'hint',text:`${r.instr.length>2?(r.instr.length-1)+' turns':r.instr.length===2?'1 turn':'No turns'}. Park speed limit 40 km/h.`}))];
+  const eta=Date.now()+r.time*1000;const turns=r.instr.filter(s=>s.type!=='arrive'&&s.type!=='waypoint').length;
+  const nodes=[...top,el('div',{class:'route-card'},el('div',{class:'big',text:`${fmtDur(r.time)} · ${fmtD(r.len)}`}),el('div',{class:'hint',text:`Arrive about ${hhmm(eta)}${r.via.length?` · via ${r.via.join(', ')}`:''}`}),el('div',{class:'hint',text:`${turns===1?'1 turn':turns?turns+' turns':'No turns'}${r.stops&&r.stops.length>1?` · ${r.stops.length} stops`:''} · roads inside the park only`}))];
+  if(r.startOff>400)nodes.push(el('div',{class:'warnrow',style:'background:#EEF2F6;color:#2B3A4A',text:`You are ${fmtD(r.startOff)} from the nearest park road. The route starts ${whereText(r.start[0],r.start[1]).replace(/^At/,'at').replace(/^Near/,'near')}.`}));
+  if(r.endOff>400)nodes.push(el('div',{class:'warnrow',style:'background:#EEF2F6;color:#2B3A4A',text:`The destination is ${fmtD(r.endOff)} from the nearest park road, so the route ends at the closest point on the road.`}));
   for(const w of r.warn)nodes.push(el('div',{class:'warnrow',text:`${RD[w.type][2]} ${RD[w.type][1]} on this route (${SEV.find(s=>s[0]===(w.sev||'1'))[1]}), reported ${ago(w.at)}. ${w.sev==='3'?'The route avoids it where it can.':'The route weighs it in.'}`}));
-  for(const s of r.sights.slice(0,3))nodes.push(el('div',{class:'warnrow',style:'background:#E4F2E8;color:#1E4D2E',text:`${emoji(s)} ${label(s)} near this route, seen ${hhmm(s.lastSeen)} (${ago(s.lastSeen)})${s.example?' (example)':''}.`}));
+  for(const x of r.sights.slice(0,3))nodes.push(el('div',{class:'warnrow',style:'background:#E4F2E8;color:#1E4D2E',text:`${emoji(x)} ${label(x)} near this route, seen ${hhmm(x.lastSeen)} (${ago(x.lastSeen)})${x.example?' (example)':''}.`}));
   if(wetness()>=5)nodes.push(el('div',{class:'warnrow',style:'background:#DCEAF8;color:#1D4F86',text:`${wetness().toFixed(0)} mm of rain in the last 24 h. Tracks may be muddy, so the route prefers the main roads.`}));
-  nodes.push(el('button',{class:'primary green',type:'button',onclick:startNav,text:'Start'}));
+  nodes.push(el('div',{class:'acts'},el('button',{class:'secondary',type:'button',onclick:startPreview,text:'▶ Preview step by step'}),el('button',{class:'primary green',type:'button',onclick:startNav,text:'Start'})));
   if(!myPos().gps)nodes.push(el('p',{class:'fine',text:'Your position is set by hand, so the route starts there. To be guided as you drive, choose "Use my GPS again" in the position menu, or try Demo drive in Settings.'}));
-  if(!S.layers.osm)nodes.push(el('p',{class:'fine',text:'Roads come from the park board until the detailed OpenStreetMap roads finish loading, so directions are approximate.'}));
-  openSheet(`To ${dest.name}`,nodes,{view:'preview'});
+  openSheet(title,nodes,{view:'preview'});
 }
 function fitRoute(r){let x0=1e18,y0=1e18,x1=-1e18,y1=-1e18;for(const q of r.pts){x0=Math.min(x0,q[0]);y0=Math.min(y0,q[1]);x1=Math.max(x1,q[0]);y1=Math.max(y1,q[1]);}cam.rot=0;cam.ax=.5;cam.ay=.32;cam.s=clamp(Math.min((W-60)/(x1-x0+1),(H*0.42)/(y1-y0+1)),0.004,0.4);cam.cx=(x0+x1)/2;cam.cy=(y0+y1)/2;redraw();}
 
@@ -880,14 +977,14 @@ function startNav(){
   if(!S.route)return;closeSheet();
   S.nav={prog:0,seg:1,off:0,next:null,spoken:{},started:Date.now()};
   document.body.classList.add('navmode');$('tiltbox').classList.toggle('tilt',S.set.tilt);
-  ['navTop','navBottom','speedBox'].forEach(i=>$(i).hidden=false);
+  ['navTop','navBottom','speedBox'].forEach(i=>$(i).hidden=false);updateSpeed();
   anim=true;keepAwake();
   say(`Starting route to ${S.route.destName}. ${fmtD(S.route.len)}.`);
   setTimeout(()=>{resize();navUpdate();requestAnimationFrame(draw);},60);
 }
 function endNav(arrived){
   stopSim();S.nav=null;anim=false;document.body.classList.remove('navmode');$('tiltbox').classList.remove('tilt');
-  ['navTop','navBottom','speedBox','navThen','navWarn'].forEach(i=>$(i).hidden=true);
+  ['navTop','navBottom','speedBox','navThen','navWarn'].forEach(i=>$(i).hidden=true);updateSpeed();
   try{wakeLock&&wakeLock.release();}catch(e){}wakeLock=null;
   if(!arrived)S.route=null;
   setTimeout(()=>{resize();const p=myPos();cam.rot=0;cam.ax=.5;cam.ay=.47;if(p)centerOn(p.x,p.y,Math.max(cam.s*.6,.03));else redraw();},60);
@@ -901,31 +998,60 @@ function navUpdate(){
   let best=null;const scan=(i0,i1)=>{for(let i=Math.max(1,i0);i<Math.min(R.pts.length,i1);i++){const a=R.pts[i-1],b=R.pts[i];const q=projSeg(p.x,p.y,a[0],a[1],b[0],b[1]);const prog=R.cum[i-1]+q.t*(R.cum[i]-R.cum[i-1]);const pen=prog<N.prog-40?40:0;if(!best||q.d+pen<best.d+best.pen)best={i,d:q.d,prog,pen};}};
   scan(N.seg-3,N.seg+80);if(!best||best.d>60)scan(1,R.pts.length);
   const tol=Math.max(45,(S.gps.acc||10)*1.5);
-  if(best.d>tol){N.off++;if(N.off>=3&&Date.now()-(N.lastRe||0)>8000){N.lastRe=Date.now();const r=route(p.x,p.y,R.dest[0],R.dest[1],R.destName);if(!r.error){S.route=r;N.prog=0;N.seg=1;N.off=0;N.spoken={};say('Rerouting.');toast('New route.');return navUpdate();}}}
+  if(best.d>tol){N.off++;if(N.off>=3&&Date.now()-(N.lastRe||0)>8000){N.lastRe=Date.now();const left=(R.stops||[]).filter(st=>st.d>N.prog+30);const r=left.length>1?routeMulti(p,left):route(p.x,p.y,R.dest[0],R.dest[1],R.destName);if(!r.error){S.route=r;N.prog=0;N.seg=1;N.off=0;N.spoken={};say('Rerouting.');toast('New route.');return navUpdate();}}}
   else {N.off=0;N.seg=best.i;N.prog=Math.max(best.prog,Math.min(N.prog,best.prog+5));N.prog=best.prog;}
   const next=R.instr.find(s=>s.d>N.prog+3)||R.instr[R.instr.length-1];N.next=next;const dist=Math.max(0,next.d-N.prog);
   const idx=R.instr.indexOf(next);const after=R.instr[idx+1];
   $('manDist').textContent=fmtD(dist);$('manText').textContent=next.type==='arrive'?`Arrive at ${R.destName}`:instrText(next);
+  if(next.type==='waypoint'&&dist<35&&!N.spoken['wp'+next.stop]){N.spoken['wp'+next.stop]=1;say(`You have reached stop ${next.stop}, ${next.name}. Look around.`);toast(`Stop ${next.stop}: ${next.name}. Look around!`);}
   drawMan($('manIcon'),next.type);
-  const then=$('navThen');if(after&&after.d-next.d<250&&next.type!=='arrive'){then.hidden=false;then.textContent=`Then ${instrText(after,false).toLowerCase()}`;}else then.hidden=true;
+  const then=$('navThen');if(after&&after.d-next.d<250&&next.type!=='arrive'&&next.type!=='waypoint'){then.hidden=false;then.textContent=`Then ${instrText(after,false).toLowerCase()}`;}else then.hidden=true;
   // warnings ahead (road reports within the next 2 km of route)
   const w=R.warn.map(r=>{const q=merc(r.lon,r.lat);let bd=1e9,bp=0;for(let i=1;i<R.pts.length;i++){const s=projSeg(q[0],q[1],R.pts[i-1][0],R.pts[i-1][1],R.pts[i][0],R.pts[i][1]);if(s.d<bd){bd=s.d;bp=R.cum[i-1]+s.t*(R.cum[i]-R.cum[i-1]);}}return {r,ahead:bp-N.prog};}).filter(o=>o.ahead>0&&o.ahead<2000).sort((a,b)=>a.ahead-b.ahead)[0];
   const wb=$('navWarn');if(w){wb.hidden=false;wb.textContent=`${RD[w.r.type][2]} ${RD[w.r.type][1]} in ${fmtD(w.ahead)}`;if(!N.spoken['w'+w.r.id]&&w.ahead<600){N.spoken['w'+w.r.id]=1;say(`Caution. ${RD[w.r.type][1]} reported ahead.`);}}else wb.hidden=true;
   // voice prompts
   const key=R.instr.indexOf(next);
   if(next.type==='arrive'){if(dist<30&&!N.spoken.arr){N.spoken.arr=1;say(`You have arrived at ${R.destName}.`);setTimeout(()=>{endNav(true);toast(`Arrived at ${R.destName}.`);},4000);}}
-  else{const t=instrText(next);
+  else if(next.type!=='waypoint'){const t=instrText(next);
     if(dist<600&&dist>250&&!N.spoken[key+'f']){N.spoken[key+'f']=1;say(`In ${fmtD(Math.round(dist/50)*50)}, ${t.toLowerCase()}.`);}
     if(dist<=90&&!N.spoken[key+'n']){N.spoken[key+'n']=1;say(t+'.');}}
   // ETA from remaining distance and speed profile
   const remain=R.len-N.prog;const secs=remain*R.tpm;$('etaTime').textContent=hhmm(Date.now()+secs*1000);$('etaRest').textContent=`${fmtDur(secs)} · ${fmtD(remain)}`;
-  const kmh=Math.round((S.gps.speed||0)*3.6);$('speedVal').textContent=kmh;$('speedBox').classList.toggle('over',kmh>40);
+  const kmh=Math.round((S.gps.speed||0)*3.6);
   // camera target: heading-up, anchored low on screen
   const hd=routeHeading(R,N.prog,p);const mpp=kmh<12?1.3:kmh<30?1.9:2.6;
   let ay=.70;if(S.set.tilt){const Hv=$('mapwrap').clientHeight,pp=1100,th=40*RAD,hs=0.27*Hv;const d=hs*pp/(pp*Math.cos(th)-hs*Math.sin(th));ay=clamp(1-d/H,.5,.95);}
   camT.cx=p.x;camT.cy=p.y;camT.s=1/mpp*(S.set.tilt?1.15:0.85);camT.rot=-hd*RAD;camT.ax=.5;camT.ay=ay;cam.ax=camT.ax;cam.ay=camT.ay;
   if(S.gps.heading==null)S.gps.heading=hd;
 }
+/* ---------- route preview: step through every turn on the map ---------- */
+function startPreview(){
+  if(!S.route)return;closeSheet();stopSim();
+  S.preview={i:0,timer:null};document.body.classList.add('navmode','previewmode');$('tiltbox').classList.toggle('tilt',S.set.tilt);
+  ['navTop','prevBar'].forEach(i=>$(i).hidden=false);anim=true;
+  setTimeout(()=>{resize();previewStep(0);requestAnimationFrame(draw);},60);
+}
+function previewStep(i){
+  const P=S.preview,R=S.route;if(!P||!R)return;const n=R.instr.length;i=clamp(i,0,n-1);P.i=i;const st=R.instr[i];const prevD=i?R.instr[i-1].d:0;
+  $('manDist').textContent=fmtD(st.d-prevD);
+  $('manText').textContent=st.type==='arrive'?`Arrive at ${R.destName}`:instrText(st);drawMan($('manIcon'),st.type);
+  $('prevCount').textContent=`Step ${i+1} of ${n}`;$('prevSub').textContent=`${fmtD(st.d)} from start · about ${fmtDur(st.d*R.tpm)}`;
+  $('prevPlay').textContent=P.timer?'❚❚':'▶';
+  const q=R.pts[st.i];const a=pointAt(R,Math.max(0,st.d-60));const hd=gd(a[0],a[1],q[0],q[1])>3?brg(a[0],a[1],q[0],q[1]):0;
+  let ay=.62;if(S.set.tilt){const Hv=$('mapwrap').clientHeight,pp=1100,th=40*RAD,hs=0.42*Hv;const d=hs*pp/(pp*Math.cos(th)-hs*Math.sin(th));ay=clamp(1-d/H,.4,.95);}
+  camT.cx=q[0];camT.cy=q[1];camT.rot=-hd*RAD;camT.s=S.set.tilt?1.15:0.75;camT.ax=.5;camT.ay=ay;cam.ax=.5;cam.ay=ay;
+  if(i===0){cam.cx=q[0];cam.cy=q[1];cam.rot=camT.rot;cam.s=camT.s*0.6;}
+}
+function previewPlay(){const P=S.preview;if(!P)return;if(P.timer){clearInterval(P.timer);P.timer=null;$('prevPlay').textContent='▶';return;}
+  P.timer=setInterval(()=>{if(!S.preview)return;if(P.i>=S.route.instr.length-1){clearInterval(P.timer);P.timer=null;$('prevPlay').textContent='▶';return;}previewStep(P.i+1);},3200);$('prevPlay').textContent='❚❚';}
+function endPreview(start){
+  const P=S.preview;if(P&&P.timer)clearInterval(P.timer);S.preview=null;anim=false;
+  document.body.classList.remove('navmode','previewmode');$('tiltbox').classList.remove('tilt');['navTop','prevBar'].forEach(i=>$(i).hidden=true);
+  setTimeout(()=>{resize();if(start)startNav();else{fitRoute(S.route);openRouteAgain();}},60);
+}
+function openRouteAgain(){const r=S.route;if(!r)return;showPlan(r,r.stops&&r.stops.length>1?`${r.stops.length} stops`:`To ${r.destName}`);}
+$('prevPrev').onclick=()=>previewStep(S.preview.i-1);$('prevNext').onclick=()=>previewStep(S.preview.i+1);$('prevPlay').onclick=previewPlay;
+$('prevClose').onclick=()=>endPreview(false);$('prevStart').onclick=()=>endPreview(true);
 function routeHeading(R,prog,p){const a=pointAt(R,prog),b=pointAt(R,prog+25);if(gd(a[0],a[1],b[0],b[1])<2)return S.gps.heading||0;return brg(a[0],a[1],b[0],b[1]);}
 function drawMan(c,type){
   const g=c.getContext('2d');g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,120,120);g.lineCap='round';g.lineJoin='round';g.strokeStyle='#fff';g.fillStyle='#fff';g.lineWidth=11;
@@ -959,9 +1085,9 @@ function openWeather(){
 $('wxPill').onclick=openWeather;
 function saveSet(){LS.set('settings',S.set);}
 function openSettings(){
-  const tog=(key,label)=>{const i=el('input',{type:'checkbox',id:'set-'+key});i.checked=!!S.set[key];i.onchange=()=>{S.set[key]=i.checked;saveSet();redraw();};return el('label',{class:'toggle',for:'set-'+key},label,i);};
+  const tog=(key,label)=>{const i=el('input',{type:'checkbox',id:'set-'+key});i.checked=!!S.set[key];i.onchange=()=>{S.set[key]=i.checked;saveSet();if(key==='sat')setSat(i.checked);redraw();};return el('label',{class:'toggle',for:'set-'+key},label,i);};
   const cfg=window.AKAGERA_FIREBASE;
-  const nodes=[tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),
+  const nodes=[tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();if(S.sim){stopSim();toast('Demo drive stopped.');}else{if(!S.route){toast('Pick a destination with Go first.');return;}startNav();startSim();}},text:S.sim?'Stop demo drive':'Demo drive along the planned route'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();startPick('me');},text:'Set my position by hand'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{S.set.hideEx=!S.set.hideEx;saveSet();closeSheet();redraw();},text:S.set.hideEx?'Show example reports':'Hide example reports'}),
@@ -984,7 +1110,7 @@ async function boot(){
   buildData();
   new ResizeObserver(()=>resize()).observe(cv);resize();fitPark();
   if(document.fonts&&document.fonts.ready)document.fonts.ready.then(redraw);
-  updateWxPill();setSync();updateGpsLine();
+  updateWxPill();setSync();updateGpsLine();updateCount();setSat(!!S.set.sat);
   startGPS();loadWeather();initSharing();loadPhotos();
   window.addEventListener('online',loadPhotos);
   setInterval(()=>{loadWeather();redraw();updateGpsLine();},60e3);

@@ -40,14 +40,14 @@
     <div class="fabcol" id="fabcol">
       <button class="fab" id="zin" type="button" aria-label="Zoom in">+</button>
       <button class="fab" id="zout" type="button" aria-label="Zoom out">&minus;</button>
-      <button class="fab" id="layerBtn" type="button" aria-label="Switch between map and satellite"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5zm-9 9l9 5 9-5M3 16l9 5 9-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
       <button class="fab me" id="followBtn" type="button" aria-label="Show my position"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l18-8-8 18-2-8-8-2z" fill="currentColor"/></svg></button>
     </div>
+    <div class="bgtoggle" role="group" aria-label="Background"><button type="button" data-bg="map" class="on" aria-pressed="true">Map</button><button type="button" data-bg="sat" aria-pressed="false">Satellite</button></div>
     <div class="banner" id="banner" hidden></div>
     <div class="bottom" id="bottomBar">
       <div class="gpsline" id="gpsline">Starting GPS…</div>
       <div class="btns">
-        <button class="bigbtn find" id="findBtn" type="button"><span aria-hidden="true">🦁</span>Animals</button>
+        <button class="bigbtn find" id="findBtn" type="button"><span aria-hidden="true">🦁</span>Animals<em class="cnt" id="lifeCount" aria-label="Animals ticked">0/34</em></button>
         <button class="bigbtn report" id="reportBtn" type="button"><svg width="26" height="26" viewBox="0 0 22 22" aria-hidden="true"><path d="M11 3v16M3 11h16" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/></svg>Report</button>
         <button class="bigbtn go" id="goBtn" type="button"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l7 19-7-4-7 4 7-19z" fill="currentColor"/></svg>Go</button>
       </div>
@@ -65,6 +65,16 @@
       <div class="eta"><b id="etaTime">--:--</b><span id="etaRest">-- min · -- km</span></div>
       <button class="navbtn" id="navReport" type="button" aria-label="Report">+</button>
       <button class="navbtn" id="navMute" type="button" aria-label="Mute voice">🔊</button>
+    </div>
+    <div class="prev-bar" id="prevBar" hidden>
+      <div class="prev-info"><b id="prevCount">Step 1</b><span id="prevSub"></span></div>
+      <div class="prev-btns">
+        <button type="button" id="prevClose" class="pb x" aria-label="Close preview">&times;</button>
+        <button type="button" id="prevPrev" class="pb" aria-label="Previous step">&#8249;</button>
+        <button type="button" id="prevPlay" class="pb play" aria-label="Play or pause">▶</button>
+        <button type="button" id="prevNext" class="pb" aria-label="Next step">&#8250;</button>
+        <button type="button" id="prevStart" class="pb go">Start</button>
+      </div>
     </div>
     <div class="speed" id="speedBox" hidden><b id="speedVal">0</b><span>km/h</span></div>
 

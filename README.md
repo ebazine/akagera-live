@@ -5,7 +5,10 @@ Open it on a phone at **https://ebazine.github.io/akagera-live/** and use *Add t
 
 ## What it does
 
-- **GPS navigation on the park's tracks.** Pick a lodge, lake, gate, junction stone or a sighting and the app plans a route on the OpenStreetMap road network, then guides you with a heading-up 3D view, turn arrows, distances, spoken directions and automatic rerouting.
+- **GPS navigation on the park's tracks.** Pick a lodge, lake, gate, junction stone or a sighting and the app plans a route on the OpenStreetMap road network, using roads inside the park only, then guides you with a heading-up 3D view, turn arrows, distances, spoken directions and automatic rerouting.
+- **Route preview.** Step through every turn on the map before you drive, or press play for a guided fly-through.
+- **Find animals.** Tick the animals you want to see; the app takes the freshest sighting of each and plans the quickest route through all of them, with arrival times.
+- **Speed warning.** Above 40 km/h inside the park the speed badge turns red, you get a spoken reminder (can be switched off in Settings).
 - **Report in three or four taps.** Animals: species, how many, which way they are moving (relative to your car). Road problems: type and severity. Your GPS position is used automatically.
 - **Timestamps everywhere.** Every sighting shows the clock time it was seen and how long ago. *Animals* lists the latest sightings and the last time each species was seen (up to 7 days).
 - **Road reports expire with the weather.** Mud, flooding and slippery climbs last a base time plus extra hours per millimetre of rain (Open-Meteo data for the north, centre and south of the park), and longer if it rains again. Other problems have fixed lifetimes (fallen tree 3 days, closure 7 days, potholes 14 days, stuck vehicle 6 h, animals on the road 1 h). Anyone can mark a report *still there* or *gone*.
