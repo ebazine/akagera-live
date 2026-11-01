@@ -39,6 +39,7 @@
 
     <!-- browse controls -->
     <div class="fabcol" id="fabcol">
+      <button class="fab sos" id="sosBtn" type="button" aria-label="Emergency help">SOS</button>
       <button class="fab" id="zin" type="button" aria-label="Zoom in">+</button>
       <button class="fab" id="zout" type="button" aria-label="Zoom out">&minus;</button>
       <button class="fab chat" id="chatBtn" type="button" aria-label="Chat">💬<i id="chatBadge" class="fbadge" hidden>0</i></button>
@@ -78,6 +79,7 @@
         <button type="button" id="prevStart" class="pb go">Start</button>
       </div>
     </div>
+    <button class="sosmini" id="sosMini" type="button" aria-label="Emergency help">SOS</button>
     <div class="speed" id="speedBox" hidden><b id="speedVal">0</b><span>km/h</span></div>
 
     <div id="toast" class="toast" role="status" hidden></div>
@@ -96,6 +98,7 @@
 </div>
 <script src="config.js"></script>
 <script src="species.js"></script>
+<script src="emergency.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

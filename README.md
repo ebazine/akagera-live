@@ -39,7 +39,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function hasPass() { return signedIn() && exists(/databases/$(database)/documents/profiles/$(request.auth.uid)); }
+    // a pass counts only between its first and last day
+    function hasPass() {
+      return signedIn()
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.startsAt <= request.time
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.expiresAt > request.time;
+    }
 
     match /reports/{id} {
       allow read: if true;
@@ -56,16 +61,30 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // visible pass: other drivers can see it only while it is active (the app hides it outside the dates);
+    // any signed-in phone may delete a pass once it has ended
     match /profiles/{uid} {
       allow read: if signedIn();
       allow create, update: if signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['name','vehicle','color','party','emoji','chat','createdAt','expiresAt','lastSeen'])
+        && request.resource.data.keys().hasOnly(['name','vehicle','color','party','emoji','chat','createdAt','startsAt','expiresAt','lastSeen'])
         && request.resource.data.name is string && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 30
         && request.resource.data.vehicle is string && request.resource.data.vehicle.size() <= 40
         && request.resource.data.party is string && request.resource.data.party.size() <= 40
-        && request.resource.data.expiresAt is timestamp
-        && request.resource.data.expiresAt < request.time + duration.value(5, 'd');
-      allow delete: if signedIn() && request.auth.uid == uid;
+        && request.resource.data.startsAt is timestamp && request.resource.data.expiresAt is timestamp
+        && request.resource.data.startsAt <= request.resource.data.expiresAt
+        && request.resource.data.expiresAt < request.resource.data.startsAt + duration.value(8, 'd')
+        && request.resource.data.startsAt < request.time + duration.value(31, 'd');
+      allow delete: if signedIn() && (request.auth.uid == uid || resource.data.expiresAt < request.time);
+    }
+
+    // private trip record, kept 30 days after the last day; only its owner can read it
+    match /trips/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name','vehicle','color','party','startsAt','endsAt','retainUntil','createdAt'])
+        && request.resource.data.retainUntil is timestamp
+        && request.resource.data.retainUntil < request.time + duration.value(75, 'd');
+      allow delete: if signedIn() && (request.auth.uid == uid || resource.data.retainUntil < request.time);
     }
 
     match /chat/{id} {
@@ -75,7 +94,7 @@ service cloud.firestore {
         && request.resource.data.text is string && request.resource.data.text.size() <= 500
         && request.resource.data.expiresAt is timestamp
         && request.resource.data.expiresAt < request.time + duration.value(2, 'd');
-      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow delete: if signedIn() && (resource.data.uid == request.auth.uid || resource.data.expiresAt < request.time);
     }
 
     match /dms/{pair} {
@@ -85,13 +104,14 @@ service cloud.firestore {
         && pair == request.resource.data.members[0] + '_' + request.resource.data.members[1];
       allow update: if signedIn() && request.auth.uid in resource.data.members
         && request.resource.data.members == resource.data.members;
+      allow delete: if signedIn() && request.auth.uid in resource.data.members;
       match /msgs/{id} {
         allow read: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/dms/$(pair)).data.members;
         allow create: if hasPass() && request.resource.data.uid == request.auth.uid
           && request.auth.uid in get(/databases/$(database)/documents/dms/$(pair)).data.members
           && request.resource.data.text is string && request.resource.data.text.size() <= 500
           && request.resource.data.expiresAt is timestamp;
-        allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+        allow delete: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/dms/$(pair)).data.members;
       }
     }
   }
@@ -102,7 +122,7 @@ The Firebase web config is not a secret; the rules above decide what visitors ca
 
 ## Trip passes and chat
 
-A **trip pass** is a temporary driver profile: a name or nickname, the vehicle (model and colour), who is in the car and a sign (an animal emoji). There is no password or email; the phone gets an anonymous Firebase sign-in. The pass lasts 1 to 4 days, chosen by the driver, and can be extended a day at a time or ended at once (which deletes the pass and every chat message the driver wrote).
+A **trip pass** is a temporary driver profile: a name or nickname, the vehicle (model and colour), who is in the car and a sign (an animal emoji). There is no password or email; the phone gets an anonymous Firebase sign-in. The driver picks the arrival and leaving dates (1 to 7 days, up to 30 days ahead). Chat and the driver list work only on those days. After the last day the pass disappears for other drivers and the trip details (name, vehicle, dates) are kept for 30 days in a private record only the driver can read, so the next trip can reuse them; the person running the app can also see them in the Firebase console. The driver can add a day, edit, or end the trip at once, which deletes everything including the 30-day record.
 
 - **Park chat** for everyone with a pass who opted in. Messages last 24 hours. Quick replies ("Still there?", "On my way") and one-tap sharing of a sighting as a card others can open or navigate to.
 - **Private messages** between two drivers, deleted after 4 days. Any driver can be blocked on your phone.
@@ -113,7 +133,11 @@ Firebase setup for this (once):
 
 1. **Authentication > Get started > Sign-in method > Anonymous > Enable > Save.**
 2. **Firestore Database > Rules:** publish the rules above.
-3. Recommended, for automatic deletion: **Firestore Database > Time-to-live (TTL) > Create policy** four times, field `expiresAt`, collection groups `profiles`, `chat`, `dms` and `msgs`. The app already hides expired items; TTL removes them from the database (usually within 24 hours of expiry).
+3. Cleanup needs no billing: any phone with the app open deletes expired passes and messages (`janitor()` in `app.js`). Trip records (`trips`) are removed by their owner's phone after 30 days. A record whose owner never opens the app again stays until deleted by hand in the console, or by a Firestore TTL policy on `retainUntil` if you ever enable billing.
+
+## Emergency help
+
+The red **SOS** button opens a screen that works offline: one-tap calls to 112 (emergency), 912 (ambulance), the park line and nearby hospital; the exact position (coordinates, nearest junction stone, GPS accuracy) as a ready-made message to share by WhatsApp, SMS, any app or copy; a button that puts a red "Needs help" pin on every driver's map and in the park chat; a checklist for waiting safely; and the driver's own emergency contacts (saved on the phone only). It cannot contact rescue services by itself. Numbers are in `emergency.js`, checked November 2026.
 
 ## Files
 
@@ -123,6 +147,8 @@ Firebase setup for this (once):
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and home-screen install |
 | `config.js` | Firebase settings for shared reports |
 | `species.js` | Animal guide, safety advice, badges and levels |
+| `emergency.js` | Emergency numbers, problem types and the waiting checklist |
+| `firestore.rules` | The Firestore security rules (paste into the Firebase console) |
 | `data/board.json` | Map traced from the park entrance board |
 | `data/osm.json` | OpenStreetMap roads and lakes (built by GitHub Actions) |
 | `tools/build_osm.py` | Builds `data/osm.json` |

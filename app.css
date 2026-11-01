@@ -258,3 +258,33 @@ textarea{width:100%;min-height:70px;border:1px solid var(--line);border-radius:1
 .sendbtn{border:0;width:50px;height:50px;border-radius:50%;background:var(--accent);color:#fff;font-size:20px;flex:none}
 .drivelock{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#FFF1C9;color:#5C4300;border-radius:14px;padding:10px 12px;font-weight:600;font-size:14.5px}
 .drivelock button{border:0;border-radius:10px;background:#5C4300;color:#fff;font-weight:700;padding:9px 12px;white-space:nowrap}
+
+/* ===== trip pass dates and emergency help ===== */
+.datepair{display:grid;grid-template-columns:auto 1fr;gap:8px 10px;align-items:center}
+.datepair label{font-weight:700;font-size:15px}
+.datepair .search{padding:11px 12px;min-width:0}
+.fab.sos{background:#C0392B;color:#fff;border-color:#C0392B;font-size:14px;font-weight:800;letter-spacing:.03em}
+.sosmini{display:none;position:absolute;left:14px;bottom:calc(176px + env(safe-area-inset-bottom));width:50px;height:50px;border-radius:50%;border:3px solid #fff;background:#C0392B;color:#fff;font-weight:800;font-size:14px;z-index:5;box-shadow:0 3px 10px rgba(0,0,0,.3)}
+.navmode .sosmini{display:grid;place-items:center}.previewmode .sosmini{display:none}
+.secondary.sosbtn{border-color:#E7B0A8;background:#FCE3DF;color:#8E1F14}
+.emwarn{background:#FFF1C9;color:#5C4300;border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;font-size:15px;line-height:1.35}
+.emcall{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:68px;border-radius:16px;background:#fff;border:2px solid var(--line);text-decoration:none;color:var(--ink);font-weight:800;font-size:19px;text-align:center}
+.emcall small{font-size:14px;font-weight:600;color:var(--muted)}
+.emcall.big{background:#C0392B;border-color:#C0392B;color:#fff;min-height:84px;font-size:30px;font-family:var(--f-display);letter-spacing:.02em}
+.emcall.big small{color:rgba(255,255,255,.9);font-size:15px;font-family:var(--f-body)}
+.emcall.suggest{border-color:#C0392B;box-shadow:inset 0 0 0 1px #C0392B}
+.emgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.emrow{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:52px;border:1px solid var(--line);border-radius:14px;background:#fff;padding:8px 14px;text-decoration:none;color:var(--ink);font-weight:700;font-size:16px}
+.emrow b{font-variant-numeric:tabular-nums;color:var(--sky);white-space:nowrap}
+.emrow.mine{background:#EEF5EE;border-color:#CFE3D2}
+.kinds{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kinds button{border:2px solid var(--line);border-radius:14px;background:var(--soft);min-height:62px;font-weight:700;font-size:15px;line-height:1.15;display:flex;align-items:center;gap:8px;padding:6px 10px;text-align:left}
+.kinds button span{font-size:26px}
+.kinds button.on{border-color:#C0392B;background:#FCE3DF}
+.posbox{border:1px solid var(--line);border-radius:14px;background:#fff;padding:12px;display:flex;flex-direction:column;gap:6px}
+.posbox .coords{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:22px;font-weight:700;letter-spacing:.01em;user-select:all}
+.posbox p{margin:0;font-size:16px}.posbox small{color:var(--muted);font-size:13.5px;line-height:1.35}
+.emmsg{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:13.5px/1.45 ui-monospace,Menlo,Consolas,monospace;background:#F4F1E8;border-radius:12px;padding:10px 12px;user-select:all}
+.waitlist{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:15.5px;line-height:1.4}
+.numrow{display:flex;flex-direction:column;gap:2px;margin-bottom:6px}.numrow small{color:var(--muted);font-size:13px;padding:0 4px}
+details.rules .search{margin-top:8px}

@@ -23,7 +23,9 @@ const ROADS = [
   ['washout','Washed out','🚧',{base:24*30}],
   ['tree','Fallen tree','🌳',{base:72}],
   ['closed','Road closed','⛔',{base:24*7}],
+  ['broken','Broken down','🛠️',{base:10}],
   ['stuck','Vehicle stuck','🚙',{base:6}],
+  ['sos','Needs help','🆘',{base:6}],
   ['block','Animals on road','🐃',{base:1}],
   ['other','Other hazard','⚠️',{base:48}]
 ];
@@ -369,11 +371,11 @@ async function initSharing(){
     let db;try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache({tabManager:F.persistentMultipleTabManager()})});}catch(e){db=F.getFirestore(app);}
     S.fs={F,db,uid:null};
     S.fs.authReady=import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`).then(AU=>{const auth=AU.getAuth(app);S.fs.AU=AU;S.fs.auth=auth;
-      AU.onAuthStateChanged(auth,u=>{S.fs.uid=u?u.uid:null;if(u&&passValid())startSocial();else if(!u)endSocial();});}).catch(()=>{});
+      AU.onAuthStateChanged(auth,u=>{S.fs.uid=u?u.uid:null;if(u&&passValid())startSocial();else if(!u)endSocial();if(u)setTimeout(socTick,1500);});}).catch(()=>{});
     const q=F.query(F.collection(db,'reports'),F.where('at','>',Date.now()-14*864e5),F.orderBy('at','desc'),F.limit(600));
     F.onSnapshot(q,{includeMetadataChanges:true},snap=>{
       S.live=snap.docs.map(d=>{const o=clean(d.id,d.data());if(o)o.pending=d.metadata.hasPendingWrites;return o;}).filter(Boolean);
-      S.sync=snap.metadata.fromCache?'offline':'live';if(S.live.length)hideBanner();setSync();redraw();refreshSheet();
+      S.sync=snap.metadata.fromCache?'offline':'live';if(S.live.length)hideBanner();setSync();redraw();refreshSheet();checkSOS();
     },err=>{S.sync='error';setSync();});
   }catch(e){S.sync='local';setSync();}
 }
@@ -572,7 +574,7 @@ function textLbl(t,x,y,font,fill,align='center',force=false){ctx.font=font;const
 const SEVCOL={'1':'#C98A00','2':'#E0670F','3':'#C0392B'};
 function drawReport(r,x,y,sel){
   const age=Date.now()-(r.lastSeen||r.at);const alpha=r.kind==='animal'?Math.max(.55,1-age/((S.animalWin||6)*3600e3)*.45):1;
-  const ring=r.kind==='animal'?'#2E7D4F':SEVCOL[r.sev||'1'];const R=sel?23:(r.kind==='animal'?19:17);
+  const ring=r.kind==='animal'?'#2E7D4F':r.type==='sos'?'#C0392B':SEVCOL[r.sev||'1'];const R=sel?23:(r.kind==='animal'?19:r.type==='sos'?22:17);
   ctx.save();ctx.globalAlpha=alpha;
   if(r.kind==='animal'&&r.heading!=null&&r.heading>=0){const a=(r.heading*45)*RAD+cam.rot-Math.PI/2,L=46;ctx.setLineDash([5,4]);ctx.lineWidth=3;ctx.strokeStyle=ring;ctx.beginPath();ctx.moveTo(x+Math.cos(a)*R,y+Math.sin(a)*R);ctx.lineTo(x+Math.cos(a)*L,y+Math.sin(a)*L);ctx.stroke();ctx.setLineDash([]);const tx=x+Math.cos(a)*(L+6),ty=y+Math.sin(a)*(L+6);ctx.beginPath();ctx.moveTo(tx,ty);ctx.lineTo(tx-Math.cos(a-.5)*12,ty-Math.sin(a-.5)*12);ctx.lineTo(tx-Math.cos(a+.5)*12,ty-Math.sin(a+.5)*12);ctx.closePath();ctx.fillStyle=ring;ctx.fill();}
   ctx.shadowColor='rgba(0,0,0,.3)';ctx.shadowBlur=6;ctx.shadowOffsetY=2;ctx.beginPath();ctx.arc(x,y,R,0,7);ctx.fillStyle='#fff';ctx.fill();ctx.shadowColor='transparent';
@@ -749,7 +751,7 @@ function stepMove(){
   openSheet('Which way are they moving?',[el('p',{class:'hint',text:rel?'Arrows are relative to your car. Up means the way you are driving.':'Arrows point to the compass. Up is north.'}),pad],{step:[4,4],back:stepCount,view:'r4'});
 }
 function stepRoadType(){
-  openSheet('What is the problem?',[el('div',{class:'grid3'},...ROADS.map(a=>el('button',{type:'button',onclick:()=>{D.type=a[0];stepSev();}},el('span',{text:a[2]}),a[1])))],{step:[2,3],back:startReport,view:'r2'});
+  openSheet('What is the problem?',[el('div',{class:'grid3'},...ROADS.filter(a=>a[0]!=='sos').map(a=>el('button',{type:'button',onclick:()=>{D.type=a[0];stepSev();}},el('span',{text:a[2]}),a[1])))],{step:[2,3],back:startReport,view:'r2'});
 }
 function stepSev(){
   openSheet('How bad is it?',[el('div',{class:'stack'},...SEV.map(s=>el('button',{class:'choice sev'+s[0],type:'button',onclick:()=>{D.sev=s[0];sendReport();}},el('span',null,s[1],el('small',{text:s[2]})))))],{step:[3,3],back:stepRoadType,view:'r3'});
@@ -763,7 +765,8 @@ function sendReport(){
   const fresh=D.kind==='animal'?tick(rec.type,'report'):null;
   const what=D.kind==='animal'?`${label(clean(rec.id,rec))}${rec.heading>=0?`, heading ${DIRNAME[rec.heading]}`:''}`:`${RD[rec.type][1]} (${SEV.find(s=>s[0]===rec.sev)[1]})`;
   if(fresh)setTimeout(()=>toast(`New on your list: ${SPX[rec.type].name} +${fresh} points`,'My list',()=>openFind('list'),6000),2600);
-  toast(`Sent: ${what}.`,'Add details',()=>openDetails(rec.id),2500);
+  const needHelp=D.kind==='road'&&['stuck','broken'].includes(D.type),ty=D.type;
+  toast(`Sent: ${what}.`,needHelp?'Emergency help':'Add details',needHelp?()=>openEmergency(ty):()=>openDetails(rec.id),needHelp?9000:2500);
 }
 function openDetails(id){
   const r=allReports().find(x=>x.id===id);if(!r)return;const patch={};
@@ -897,7 +900,7 @@ function openReportView(r,silent){
   nodes.push(el('div',{class:'det-head'},r.kind==='animal'?pic(r.type,64):el('span',{class:'em',text:emoji(r)}),el('div',null,el('b',{text:label(r)}),el('div',{class:'when',text:`${r.kind==='animal'?'Seen':'Reported'} ${hhmm(r.at)} ${dayWord(r.at)}`}),el('p',{class:'hint',text:ago(r.at)+(r.lastSeen-r.at>60e3?` · confirmed ${hhmm(r.lastSeen)} (${ago(r.lastSeen)})`:'')}))));
   const tags=[];if(r.example)tags.push(el('span',{class:'tag ex',text:'Example, not a real report'}));if(r.pending)tags.push(el('span',{class:'tag',text:'Waiting for signal to send'}));
   if(t.there)tags.push(el('span',{class:'tag',text:`${t.there} confirmed`}));if(t.gone)tags.push(el('span',{class:'tag',text:`${t.gone} say gone`}));
-  if(r.kind==='road')tags.push(el('span',{class:'tag',text:SEV.find(s=>s[0]===(r.sev||'1'))[1]}));
+  if(r.kind==='road'&&r.type!=='sos')tags.push(el('span',{class:'tag',text:SEV.find(s=>s[0]===(r.sev||'1'))[1]}));
   if(r.act)tags.push(el('span',{class:'tag',text:r.act}));if(r.rdist)tags.push(el('span',{class:'tag',text:r.rdist}));
   if(tags.length)nodes.push(el('div',{class:'meta'},...tags));
   const lines=[el('p',null,el('b',{text:'Where: '}),whereText(q[0],q[1])+'.')];
@@ -906,6 +909,7 @@ function openReportView(r,silent){
   if(r.kind==='road'){const life=roadLife(r);lines.push(el('p',null,el('b',{text:'Likely until: '}),`about ${stamp(life.until)}.`));lines.push(el('p',{class:'fine',text:life.why+(life.next>=2?` More rain is forecast (${Math.round(life.next)} mm in the next 12 h), which would make it last longer.`:'')}));}
   nodes.push(el('div',{class:'dir'},...lines));
   if(r.note)nodes.push(el('p',{class:'note',text:r.note}));
+  if(r.type==='sos'){nodes.push(el('div',{class:'safety warn'},el('b',{text:'If you want to help'}),el('ul',null,el('li',{text:'Do not leave your vehicle if any animal is near.'}),el('li',{text:'Call the park on +250 786 182 871 and tell them where this is.'}),el('li',{text:'The driver may already have called. Keep your distance from the vehicle until you know.'}))),el('a',{class:'secondary',href:'tel:+250786182871',text:'📞 Call the park'}));}
   {const who=r.uid?personByUid(r.uid):null;if(who)nodes.push(el('p',{class:'fine',text:`Reported by ${who.emoji} ${who.name} · ${vehLabel(who)}`}));else if(r.by===S.device)nodes.push(el('p',{class:'fine',text:'Reported by you'}));}
   nodes.push(el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:q[0],y:q[1],name:label(r)}),text:'Navigate here'}));
   if(!r.example&&passValid()&&SOC.profile.chat)nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>shareToChat(r),text:'💬 Share in the park chat'}));
@@ -1078,8 +1082,14 @@ const COLORS=['White','Silver','Grey','Black','Green','Beige','Blue','Red','Othe
 const AVATARS=['🦁','🐘','🦒','🦓','🦏','🐆','🦛','🦅','🐒','🦉'];
 const QUICK=['Where exactly?','Still there?','Thanks!','On my way','Road clear?','Gone now'];
 const SOC={profile:LS.get('pass',null),people:[],chat:[],dms:[],thread:null,threadMsgs:[],lastRead:LS.get('chatRead',0),dmRead:LS.get('dmRead',{}),blocked:LS.get('blocked',[]),passenger:false,subs:{},render:null,started:false};
-if(SOC.profile&&!(SOC.profile.expiresAt>Date.now())){SOC.profile=null;LS.set('pass',null);}
-const passValid=()=>!!(SOC.profile&&SOC.profile.expiresAt>Date.now());
+const passActive=()=>!!(SOC.profile&&(SOC.profile.startsAt||0)<=Date.now()&&SOC.profile.expiresAt>Date.now());
+const passValid=passActive;
+const passUpcoming=()=>!!(SOC.profile&&(SOC.profile.startsAt||0)>Date.now());
+const passExists=()=>!!(SOC.profile&&SOC.profile.expiresAt>Date.now());
+const dISO=t=>{const d=new Date(t);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+const fromISO=(v,end)=>{const [y,m,d]=v.split('-').map(Number);return end?new Date(y,m-1,d,23,59,59,999).getTime():new Date(y,m-1,d,0,0,0,0).getTime();};
+const dShort=t=>new Date(t).toLocaleDateString([], {weekday:'short',day:'numeric',month:'short'});
+const KEEP_DAYS=30;
 const vehLabel=p=>[p.color&&p.color!=='Other'?p.color:'',p.vehicle].filter(Boolean).join(' ')||'Vehicle not given';
 const tsMs=v=>v&&typeof v.toMillis==='function'?v.toMillis():+v||0;
 async function ensureAuth(){
@@ -1088,7 +1098,7 @@ async function ensureAuth(){
   const cred=await S.fs.AU.signInAnonymously(S.fs.auth);S.fs.uid=cred.user.uid;return S.fs.uid;
 }
 function cleanProfile(id,d){if(!d||typeof d.name!=='string')return null;const exp=tsMs(d.expiresAt);if(exp<Date.now())return null;
-  return {uid:id,name:d.name.slice(0,30),vehicle:String(d.vehicle||'').slice(0,40),color:COLORS.includes(d.color)?d.color:'',party:String(d.party||'').slice(0,40),emoji:AVATARS.includes(d.emoji)?d.emoji:'🙂',chat:!!d.chat,expiresAt:exp,lastSeen:tsMs(d.lastSeen)};}
+  return {uid:id,name:d.name.slice(0,30),vehicle:String(d.vehicle||'').slice(0,40),color:COLORS.includes(d.color)?d.color:'',party:String(d.party||'').slice(0,40),emoji:AVATARS.includes(d.emoji)?d.emoji:'🙂',chat:!!d.chat,expiresAt:exp,startsAt:tsMs(d.startsAt)||tsMs(d.createdAt)||0,lastSeen:tsMs(d.lastSeen)};}
 function cleanMsg(id,d){if(!d||typeof d.text!=='string'||typeof d.uid!=='string')return null;const at=+d.at;if(!(at>1.6e12))return null;
   const m={id,uid:d.uid,name:String(d.name||'Driver').slice(0,30),emoji:AVATARS.includes(d.emoji)?d.emoji:'🙂',vehicle:String(d.vehicle||'').slice(0,50),text:d.text.slice(0,500),at,kind:d.kind==='sighting'?'sighting':'text'};
   if(m.kind==='sighting'&&d.rep&&typeof d.rep==='object'){const r=d.rep;if(+r.lat<-1&&+r.lat>-2.3&&+r.lon>30.2&&+r.lon<31.2)m.rep={id:String(r.id||''),type:String(r.type||''),kind:r.kind==='road'?'road':'animal',label:String(r.label||'').slice(0,60),lat:+r.lat,lon:+r.lon,at:+r.at||at};}
@@ -1120,45 +1130,61 @@ function endSocial(){for(const k in SOC.subs){const u=SOC.subs[k];if(typeof u===
 function socRefresh(kind){if($('sheet').hidden)return;if(sheetView==='chat:'+kind&&SOC.render)SOC.render();else if(kind==='dms'&&sheetView&&sheetView.startsWith('thread:')&&SOC.render)SOC.render();else if(sheetView==='pass'&&kind==='people')openPass();}
 function unreadCount(){if(!passValid())return 0;const uid=S.fs&&S.fs.uid;let n=SOC.chat.filter(m=>m.at>SOC.lastRead&&m.uid!==uid&&!SOC.blocked.includes(m.uid)).length;for(const t of SOC.dms){if((t.lastAt||0)>(SOC.dmRead[t.id]||0)&&t.lastBy!==uid)n++;}return n;}
 function updateChatBadge(){const b=$('chatBadge');if(!b)return;const n=unreadCount();b.hidden=!n;b.textContent=n>9?'9+':String(n);}
-function updateMeBtn(){const b=$('meBtn');if(!b)return;b.textContent=passValid()?SOC.profile.emoji:'👤';b.setAttribute('aria-label',passValid()?`Trip pass: ${SOC.profile.name}`:'Create a trip pass');}
+function updateMeBtn(){const b=$('meBtn');if(!b)return;const ex=passExists();b.textContent=ex?SOC.profile.emoji:'👤';b.setAttribute('aria-label',ex?(passUpcoming()?`Trip pass starts ${dShort(SOC.profile.startsAt)}`:`Trip pass: ${SOC.profile.name}`):'Create a trip pass');}
 
 /* ---------- trip pass sheet ---------- */
 function openPass(edit){
-  if(!S.fs){openSheet('Trip pass',[el('p',{class:'hint',text:'Trip passes and chat need the shared database (Firebase). It is not connected on this phone right now.'})],{view:'pass'});return;}
-  if(passValid()&&!edit)return showPass();
-  const P=(edit&&SOC.profile)||{};const f={name:P.name||'',vehicle:P.vehicle||'',color:P.color||'White',party:P.party||'',emoji:P.emoji||'🦁',days:3,chat:edit?!!P.chat:true,showName:LS.get('showName',true)};
+  if(!S.fs){openSheet('Trip pass',[el('p',{class:'hint',text:'Trip passes and chat need the shared database (Firebase). It is not connected on this phone right now.'}),el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help works without it'})],{view:'pass'});return;}
+  if(passExists()&&!edit)return showPass();
+  const L=!edit?LS.get('trip',null):null;const P=(edit&&SOC.profile)||L||{};const today=dISO(Date.now());
+  const f={name:P.name||'',vehicle:P.vehicle||'',color:P.color||'White',party:P.party||'',emoji:P.emoji||'🦁',chat:edit?!!P.chat:true,showName:LS.get('showName',true)};
   const name=el('input',{class:'search',id:'p-name',maxlength:'30',placeholder:'Your first name or nickname',autocomplete:'given-name','aria-label':'Name'});name.value=f.name;
   const veh=el('input',{class:'search',id:'p-veh',maxlength:'40',placeholder:'Vehicle, e.g. Toyota Prado','aria-label':'Vehicle'});veh.value=f.vehicle;
   const party=el('input',{class:'search',id:'p-party',maxlength:'40',placeholder:'Optional: e.g. 2 adults, 2 kids','aria-label':'Who is in the car'});party.value=f.party;
-  const chips=(list,key,lab)=>{const w=el('div',{class:'optrow'});for(const v of list){const b=el('button',{type:'button',class:'opt'+(f[key]===v?' on':''),text:lab?lab(v):String(v)});b.onclick=()=>{f[key]=v;[...w.children].forEach(c=>c.classList.remove('on'));b.classList.add('on');};w.append(b);}return w;};
+  const from=el('input',{class:'search',type:'date',id:'p-from','aria-label':'Arrival date'}),to=el('input',{class:'search',type:'date',id:'p-to','aria-label':'Leaving date'});
+  from.value=edit?dISO(P.startsAt||Date.now()):today;to.value=edit?dISO(P.expiresAt):dISO(Date.now()+864e5);
+  if(!edit){from.min=today;to.min=today;}from.max=dISO(Date.now()+30*864e5);
+  const dsum=el('p',{class:'fine'});
+  const upd=()=>{const a=from.value,b=to.value;if(!a||!b){dsum.textContent='';return;}const n=Math.round((fromISO(b,true)-fromISO(a))/864e5);dsum.textContent=n<1?'The leaving date must be on or after the arrival date.':n>7?'A pass covers at most 7 days.':`${n} day${n>1?'s':''}: ${dShort(fromISO(a))} to ${dShort(fromISO(b))}. Chat and your name on the map work only on these days.`;};
+  from.onchange=()=>{if(to.value<from.value)to.value=from.value;upd();};to.onchange=upd;
+  const dayChips=el('div',{class:'optrow'},...[1,2,3,4,7].map(n=>{const b=el('button',{type:'button',class:'opt',text:n===1?'1 day':n+' days'});b.onclick=()=>{const e=new Date(fromISO(from.value||today));e.setDate(e.getDate()+n-1);to.value=dISO(e.getTime());upd();};return b;}));
+  upd();
+  const chips=(list,key)=>{const w=el('div',{class:'optrow'});for(const v of list){const b=el('button',{type:'button',class:'opt'+(f[key]===v?' on':''),text:String(v)});b.onclick=()=>{f[key]=v;[...w.children].forEach(c=>c.classList.remove('on'));b.classList.add('on');};w.append(b);}return w;};
   const chatT=el('input',{type:'checkbox',id:'p-chat'});chatT.checked=f.chat;const nameT=el('input',{type:'checkbox',id:'p-show'});nameT.checked=f.showName;
   const save=el('button',{class:'primary',type:'button',text:edit?'Save changes':'Create my trip pass'});
   save.onclick=async()=>{f.name=name.value.trim();f.vehicle=veh.value.trim();f.party=party.value.trim();f.chat=chatT.checked;f.showName=nameT.checked;
     if(f.name.length<2){toast('Please enter a name of at least 2 letters.');name.focus();return;}
+    const a=from.value,b=to.value;if(!a||!b){toast('Choose your arrival and leaving dates.');return;}
+    const sA=fromISO(a),eB=fromISO(b,true),n=Math.round((eB-sA)/864e5);
+    if(n<1){toast('The leaving date must be on or after the arrival date.');return;}if(n>7){toast('A trip pass covers at most 7 days.');return;}
+    if(!edit&&eB<Date.now()){toast('Those dates have passed.');return;}if(sA>Date.now()+30*864e5){toast('You can register up to 30 days ahead.');return;}
+    f.startsAt=sA;f.expiresAt=eB;
     save.disabled=true;const label0=save.textContent;save.textContent='Saving…';
-    try{if(edit)f.expiresAt=SOC.profile.expiresAt;await savePass(f,!edit);LS.set('showName',f.showName);
-      if(edit){showPass();toast('Saved.');}else{closeSheet();toast(`Welcome, ${f.name}! Your pass lasts ${f.days} day${f.days>1?'s':''}.`);if(f.chat)setTimeout(()=>openChat('park'),600);}}
+    try{await savePass(f,!edit);LS.set('showName',f.showName);
+      if(edit){showPass();toast('Saved.');}else{closeSheet();toast(passActive()?`Welcome, ${f.name}! Valid ${dShort(sA)} to ${dShort(eB)}.`:`Pass saved. Chat opens on ${dShort(sA)}.`);if(f.chat&&passActive())setTimeout(()=>openChat('park'),600);}}
     catch(e){save.disabled=false;save.textContent=label0;passError(e);}};
   openSheet(edit?'Edit trip pass':'Trip pass',[
-    edit?null:el('div',{class:'passintro'},el('b',{text:'Temporary. No password, no email.'}),el('span',{text:'Your name and vehicle let other drivers recognise you in the park chat and on your reports. Everything is deleted automatically when the pass ends.'})),
+    edit?null:L?el('div',{class:'passintro'},el('b',{text:'Welcome back'}),el('span',{text:`Your details from ${dShort(L.endsAt)} are filled in. Choose your new dates.`})):el('div',{class:'passintro'},el('b',{text:'Temporary. No password, no email.'}),el('span',{text:'Your name and vehicle let other drivers recognise you in the park chat and on your reports. Chat and your name on the map end with your last day.'})),
+    el('p',{class:'lbl',text:'Days in the park'}),el('div',{class:'datepair'},el('label',{for:'p-from',text:'Arrive'}),from,el('label',{for:'p-to',text:'Leave'}),to),dayChips,dsum,
     el('p',{class:'lbl',text:'Name'}),name,
     el('p',{class:'lbl',text:'Vehicle'}),veh,chips(COLORS,'color'),
     el('p',{class:'lbl',text:'Who is in the car'}),party,
     el('p',{class:'lbl',text:'Your sign'}),chips(AVATARS,'emoji'),
-    edit?null:el('p',{class:'lbl',text:'Pass lasts'}),edit?null:chips([1,2,3,4],'days',d=>`${d} day${d>1?'s':''}`),
     el('label',{class:'toggle',for:'p-chat'},'Join the park chat',chatT),
     el('label',{class:'toggle',for:'p-show'},'Show my name on my reports',nameT),
     save,
-    el('p',{class:'fine',text:'Please do not share number plates, phone numbers or exact plans. Only people with a trip pass can read the chat.'})
+    el('p',{class:'fine',text:`Your trip details (name, vehicle, dates) are kept for ${KEEP_DAYS} days after your last day so you can reuse them, then removed. The person running this app can see them in the database. You can delete everything at any time with "End my trip".`}),
+    el('p',{class:'fine',text:'Please do not share number plates, phone numbers or exact plans in the chat. Only people with a trip pass can read it.'})
   ],{view:edit?'pass-edit':'pass-new',back:edit?showPass:null});
 }
 async function savePass(f,isNew){
   const uid=await ensureAuth();const {F,db}=S.fs;const now=Date.now();
-  const created=isNew||!SOC.profile?now:SOC.profile.createdAt;const exp=isNew?now+f.days*864e5:f.expiresAt;
-  const doc={name:f.name.slice(0,30),vehicle:f.vehicle.slice(0,40),color:f.color,party:(f.party||'').slice(0,40),emoji:f.emoji,chat:!!f.chat,createdAt:F.Timestamp.fromMillis(created),expiresAt:F.Timestamp.fromMillis(exp),lastSeen:F.Timestamp.now()};
+  const created=isNew||!SOC.profile?now:SOC.profile.createdAt;const T=ms=>F.Timestamp.fromMillis(ms);
+  const doc={name:f.name.slice(0,30),vehicle:f.vehicle.slice(0,40),color:f.color,party:(f.party||'').slice(0,40),emoji:f.emoji,chat:!!f.chat,createdAt:T(created),startsAt:T(f.startsAt),expiresAt:T(f.expiresAt),lastSeen:F.Timestamp.now()};
   await F.setDoc(F.doc(db,'profiles',uid),doc);
-  SOC.profile={uid,name:doc.name,vehicle:doc.vehicle,color:doc.color,party:doc.party,emoji:doc.emoji,chat:doc.chat,createdAt:created,expiresAt:exp};LS.set('pass',SOC.profile);
-  endSocial();startSocial();updateMeBtn();
+  F.setDoc(F.doc(db,'trips',uid),{name:doc.name,vehicle:doc.vehicle,color:doc.color,party:doc.party,startsAt:doc.startsAt,endsAt:doc.expiresAt,createdAt:doc.createdAt,retainUntil:T(f.expiresAt+KEEP_DAYS*864e5)}).catch(()=>{});
+  SOC.profile={uid,name:doc.name,vehicle:doc.vehicle,color:doc.color,party:doc.party,emoji:doc.emoji,chat:doc.chat,createdAt:created,startsAt:f.startsAt,expiresAt:f.expiresAt};LS.set('pass',SOC.profile);LS.set('trip',null);
+  endSocial();if(passActive())startSocial();updateMeBtn();
 }
 function passError(e){const c=e&&e.code||'';
   if(c==='auth/operation-not-allowed'||c==='auth/admin-restricted-operation')openSheet('One setting missing',[el('p',{class:'hint',text:'Anonymous sign-in is not switched on in the Firebase project yet. In the Firebase console: Authentication > Get started > Sign-in method > Anonymous > Enable > Save. Then try again.'})],{view:'passerr'});
@@ -1166,33 +1192,53 @@ function passError(e){const c=e&&e.code||'';
   else if(c==='auth/network-request-failed'||c==='unavailable')toast('No signal. Try again when you have coverage.');
   else toast('Could not create the pass: '+(c||'error'),null,null,6000);}
 function showPass(){
-  const p=SOC.profile;const left=p.expiresAt-Date.now();
-  const others=SOC.people.filter(x=>x.uid!==p.uid&&x.chat&&Date.now()-x.lastSeen<12*3600e3).length;
+  const p=SOC.profile;if(!p)return openPass();const up=passUpcoming();const left=p.expiresAt-Date.now();
+  const others=SOC.people.filter(x=>x.uid!==p.uid&&x.chat&&Date.now()-x.lastSeen<12*3600e3&&x.startsAt<=Date.now()).length;
+  const maxEnd=fromISO(dISO((p.startsAt||Date.now())+6*864e5),true);
+  const when=up?`Starts ${dShort(p.startsAt)}`:`${left>864e5?Math.floor(left/864e5)+' d '+Math.round((left%864e5)/3600e3)+' h':Math.max(1,Math.round(left/3600e3))+' h'} left`;
   openSheet('Trip pass',[
-    el('div',{class:'passcard'},el('span',{class:'av',text:p.emoji}),el('div',null,el('b',{text:p.name}),el('span',{text:vehLabel(p)}),p.party?el('span',{text:p.party}):null),
-      el('small',{text:`Ends ${stamp(p.expiresAt)} · ${left>864e5?Math.floor(left/864e5)+' d '+Math.round((left%864e5)/3600e3)+' h':Math.max(1,Math.round(left/3600e3))+' h'} left`})),
-    el('div',{class:'acts'},
-      p.chat?el('button',{class:'primary blue',type:'button',onclick:()=>openChat('park'),text:`💬 Park chat${others?` · ${others} here`:''}`}):el('button',{class:'primary blue',type:'button',onclick:()=>togglePassChat(true),text:'Join the park chat'})),
-    el('div',{class:'acts'},
-      el('button',{class:'secondary',type:'button',onclick:()=>openPass(true),text:'Edit'}),
-      el('button',{class:'secondary',type:'button',disabled:p.expiresAt-Date.now()>3.9*864e5,onclick:extendPass,text:'Add a day'})),
-    p.chat?el('button',{class:'secondary',type:'button',onclick:()=>togglePassChat(false),text:'Leave the chat (stay hidden)'}):null,
+    el('div',{class:'passcard'},el('span',{class:'av',text:p.emoji}),el('div',null,el('b',{text:p.name}),el('span',{text:vehLabel(p)}),p.party?el('span',{text:p.party}):null),el('small',{text:`${dShort(p.startsAt||p.createdAt)} to ${dShort(p.expiresAt)} · ${when}`})),
+    up?el('p',{class:'hint',text:`Chat and the driver list open on ${dShort(p.startsAt)}. Sightings, routes and emergency help work now.`}):(p.chat?el('button',{class:'primary blue',type:'button',onclick:()=>openChat('park'),text:`💬 Park chat${others?` · ${others} here`:''}`}):el('button',{class:'primary blue',type:'button',onclick:()=>togglePassChat(true),text:'Join the park chat'})),
+    el('div',{class:'acts'},el('button',{class:'secondary',type:'button',onclick:()=>openPass(true),text:'Edit dates and details'}),el('button',{class:'secondary',type:'button',disabled:p.expiresAt>=maxEnd,onclick:extendPass,text:'Add a day'})),
+    el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help'}),
+    p.chat&&!up?el('button',{class:'secondary',type:'button',onclick:()=>togglePassChat(false),text:'Leave the chat (stay hidden)'}):null,
     el('button',{class:'secondary no',type:'button',onclick:confirmEnd,text:'End my trip now and delete everything'}),
-    el('p',{class:'fine',text:'Your pass, your chat messages and your name on reports disappear when the pass ends. Reports themselves stay (without your name) until they expire.'})
+    el('p',{class:'fine',text:`Chat messages and your name on reports end with the pass. Your trip details (name, vehicle, dates) are kept until ${dShort(p.expiresAt+KEEP_DAYS*864e5)}, 30 days after your last day, then removed. Reports themselves stay, without your name, until they expire.`})
   ],{view:'pass'});
 }
-async function extendPass(){const p=SOC.profile;const exp=Math.min(Date.now()+4*864e5,p.expiresAt+864e5);try{const {F,db}=S.fs;await F.updateDoc(F.doc(db,'profiles',S.fs.uid),{expiresAt:F.Timestamp.fromMillis(exp)});p.expiresAt=exp;LS.set('pass',p);showPass();toast('One day added.');}catch(e){passError(e);}}
-async function togglePassChat(on){const p=SOC.profile;try{const {F,db}=S.fs;await F.updateDoc(F.doc(db,'profiles',S.fs.uid),{chat:on});p.chat=on;LS.set('pass',p);endSocial();startSocial();showPass();if(on)openChat('park');}catch(e){passError(e);}}
-function confirmEnd(){openSheet('End your trip?',[el('p',{class:'hint',text:'This deletes your trip pass and every chat message you wrote, now. Your list of ticked animals stays on this phone.'}),
-  el('button',{class:'primary',type:'button',onclick:endTrip,text:'Delete my pass and messages'}),el('button',{class:'secondary',type:'button',onclick:showPass,text:'Keep my pass'})],{view:'end'});}
+async function extendPass(){const p=SOC.profile;const maxEnd=fromISO(dISO((p.startsAt||Date.now())+6*864e5),true);const exp=Math.min(p.expiresAt+864e5,maxEnd);
+  if(exp<=p.expiresAt){toast('A pass covers at most 7 days.');return;}
+  try{const {F,db}=S.fs;await F.updateDoc(F.doc(db,'profiles',S.fs.uid),{expiresAt:F.Timestamp.fromMillis(exp)});F.updateDoc(F.doc(db,'trips',S.fs.uid),{endsAt:F.Timestamp.fromMillis(exp),retainUntil:F.Timestamp.fromMillis(exp+KEEP_DAYS*864e5)}).catch(()=>{});p.expiresAt=exp;LS.set('pass',p);showPass();toast('One day added.');}catch(e){passError(e);}}
+async function togglePassChat(on){const p=SOC.profile;try{const {F,db}=S.fs;await F.updateDoc(F.doc(db,'profiles',S.fs.uid),{chat:on});p.chat=on;LS.set('pass',p);endSocial();startSocial();showPass();if(on&&passActive())openChat('park');}catch(e){passError(e);}}
+function confirmEnd(){openSheet('End your trip?',[el('p',{class:'hint',text:'This deletes your trip pass, your trip details and every chat message you wrote, now. Your list of ticked animals stays on this phone.'}),
+  el('button',{class:'primary',type:'button',onclick:endTrip,text:'Delete everything now'}),el('button',{class:'secondary',type:'button',onclick:showPass,text:'Keep my pass'})],{view:'end'});}
 async function endTrip(){
-  const {F,db}=S.fs,uid=S.fs.uid;toast('Deleting…');
-  try{
-    const mine=await F.getDocs(F.query(F.collection(db,'chat'),F.where('uid','==',uid)));for(const d of mine.docs)await F.deleteDoc(d.ref);
-    for(const t of SOC.dms){const ms=await F.getDocs(F.query(F.collection(db,'dms',t.id,'msgs'),F.where('uid','==',uid)));for(const d of ms.docs)await F.deleteDoc(d.ref);}
-    await F.deleteDoc(F.doc(db,'profiles',uid));
-  }catch(e){}
-  endSocial();SOC.profile=null;LS.set('pass',null);try{await S.fs.AU.signOut(S.fs.auth);}catch(e){}S.fs.uid=null;closeSheet();updateMeBtn();toast('Trip ended. Your pass and messages are deleted.');
+  const {F,db}=S.fs,uid=S.fs.uid;toast('Deleting…');const tr=async f=>{try{await f();}catch(e){}};
+  await tr(async()=>{const mine=await F.getDocs(F.query(F.collection(db,'chat'),F.where('uid','==',uid)));for(const d of mine.docs)await F.deleteDoc(d.ref);});
+  for(const t of SOC.dms)await tr(async()=>{const ms=await F.getDocs(F.query(F.collection(db,'dms',t.id,'msgs'),F.where('uid','==',uid)));for(const d of ms.docs)await F.deleteDoc(d.ref);});
+  await tr(()=>F.deleteDoc(F.doc(db,'trips',uid)));await tr(()=>F.deleteDoc(F.doc(db,'profiles',uid)));
+  endSocial();SOC.profile=null;LS.set('pass',null);LS.set('trip',null);try{await S.fs.AU.signOut(S.fs.auth);}catch(e){}S.fs.uid=null;closeSheet();updateMeBtn();toast('Trip ended. Your pass, trip details and messages are deleted.');
+}
+/* when a pass ends the visible parts disappear at once; trip details stay for 30 days */
+function retire(){const p=SOC.profile;if(!p)return;
+  LS.set('trip',{name:p.name,vehicle:p.vehicle,color:p.color,party:p.party,emoji:p.emoji,startsAt:p.startsAt||p.createdAt,endsAt:p.expiresAt,retainUntil:p.expiresAt+KEEP_DAYS*864e5});
+  endSocial();SOC.profile=null;LS.set('pass',null);updateMeBtn();janitor();
+  toast(`Your trip pass has ended. Trip details are kept until ${dShort(p.expiresAt+KEEP_DAYS*864e5)}.`,'Start a new trip',()=>openPass(),9000);}
+/* any phone with the app open removes expired passes and messages, so the database stays tidy without billing */
+async function janitor(){
+  if(!S.fs||!S.fs.uid)return;const {F,db}=S.fs,uid=S.fs.uid,now=F.Timestamp.now();const tr=async f=>{try{await f();}catch(e){}};
+  await tr(async()=>{const pr=await F.getDocs(F.query(F.collection(db,'profiles'),F.where('expiresAt','<',now),F.limit(25)));for(const d of pr.docs)await tr(()=>F.deleteDoc(d.ref));});
+  if(passActive())await tr(async()=>{const ch=await F.getDocs(F.query(F.collection(db,'chat'),F.where('expiresAt','<',now),F.limit(40)));for(const d of ch.docs)await tr(()=>F.deleteDoc(d.ref));});
+  await tr(async()=>{const ds=await F.getDocs(F.query(F.collection(db,'dms'),F.where('members','array-contains',uid)));for(const t of ds.docs){if(tsMs(t.data().expiresAt)<Date.now()){const ms=await F.getDocs(F.collection(db,'dms',t.id,'msgs'));for(const m of ms.docs)await tr(()=>F.deleteDoc(m.ref));await tr(()=>F.deleteDoc(t.ref));}}});
+  await tr(async()=>{const t=await F.getDoc(F.doc(db,'trips',uid));if(t.exists()&&tsMs(t.data().retainUntil)<Date.now())await F.deleteDoc(t.ref);});
+}
+function socTick(){
+  const p=SOC.profile;
+  if(p&&!(p.expiresAt>Date.now()))retire();
+  else if(p&&passActive()&&!SOC.started&&S.fs&&S.fs.uid)startSocial();
+  if(S.fs&&S.fs.uid&&Date.now()-(SOC.lastJan||0)>3600e3){SOC.lastJan=Date.now();janitor();}
+  const t=LS.get('trip',null);if(t&&t.retainUntil<Date.now())LS.set('trip',null);
+  updateMeBtn();
 }
 
 /* ---------- chat ---------- */
@@ -1219,7 +1265,7 @@ function msgNode(m,uid){
   return el('div',{class:'msg'+(mine?' me':'')},...kids);
 }
 function openChat(tab='park'){
-  if(!passValid()||!S.fs||!S.fs.uid){openPass();return;}
+  if(!passValid()||!S.fs||!S.fs.uid){if(passUpcoming()||passExists())showPass();else openPass();return;}
   if(!SOC.profile.chat){showPass();return;}
   const uid=S.fs.uid;
   if(tab==='park'){
@@ -1236,7 +1282,7 @@ function openChat(tab='park'){
       $('sheetBody').replaceChildren(chatTabs('dms'),rows.length?el('ul',{class:'list'},...rows):el('p',{class:'empty',text:'No private messages. Open People to message a driver.'}));};
     openSheet('Chat',[],{view:'chat:dms',tall:true});SOC.render();
   } else {
-    SOC.render=()=>{const ppl=SOC.people.filter(p=>p.chat&&Date.now()-p.lastSeen<12*3600e3).sort((a,b)=>(a.uid===uid?-1:b.uid===uid?1:b.lastSeen-a.lastSeen));
+    SOC.render=()=>{const ppl=SOC.people.filter(p=>p.chat&&p.startsAt<=Date.now()&&Date.now()-p.lastSeen<12*3600e3).sort((a,b)=>(a.uid===uid?-1:b.uid===uid?1:b.lastSeen-a.lastSeen));
       $('sheetBody').replaceChildren(chatTabs('people'),el('p',{class:'hint',text:`${ppl.length} driver${ppl.length===1?'':'s'} with a trip pass active in the last 12 hours.`}),
         el('ul',{class:'list'},...ppl.map(p=>{const me=p.uid===uid,bl=SOC.blocked.includes(p.uid);return el('li',null,el('button',{type:'button',disabled:me,onclick:()=>openPerson(p)},el('span',{class:'em',text:p.emoji}),el('span',null,el('b',{text:p.name+(me?' (you)':'')+(bl?' · blocked':'')}),el('small',{text:vehLabel(p)+(p.party?' · '+p.party:'')})),el('span',{class:'r',text:Date.now()-p.lastSeen<15*60e3?'active':ago(p.lastSeen)})));})));};
     openSheet('Chat',[],{view:'chat:people',tall:true});SOC.render();
@@ -1271,6 +1317,94 @@ async function openThread(other,name){
 }
 
 /* =========================================================================
+   11c. Emergency help: who to call, share your exact position, warn nearby drivers
+   Works fully offline. It cannot call rescue services by itself.
+   ========================================================================= */
+const EM={kind:window.EMERGENCY.kinds[0],sent:null};
+function emPos(){const p=myPos();if(p)return {...p,stale:0};const g=S.gps;if(g.ok)return {x:g.x,y:g.y,lat:g.lat,lon:g.lon,gps:true,stale:Date.now()-g.t};return null;}
+function emWho(){return passExists()?SOC.profile:LS.get('trip',null);}
+function emText(kind,p){
+  const w=emWho(),la=p.lat.toFixed(5),lo=p.lon.toFixed(5);
+  const L=['EMERGENCY at Akagera National Park, Rwanda',`Problem: ${kind.label}`];
+  if(w){L.push(`Name: ${w.name}`);L.push(`Vehicle: ${vehLabel(w)}`);if(w.party)L.push(`In the car: ${w.party}`);}
+  L.push(`Position: ${la}, ${lo}`,`Map: https://maps.google.com/?q=${la},${lo}`,`Near: ${whereText(p.x,p.y)}`);
+  L.push(p.gps?(p.stale>120e3?`GPS position is from ${ago(Date.now()-p.stale)}`:`GPS accuracy about ${Math.round(S.gps.acc||20)} m`):'Position set by hand, may be off by up to 1 km');
+  L.push(`Time: ${hhmm(Date.now())} ${dayWord(Date.now())}`);
+  return L.join('\n');
+}
+async function copyText(t){try{await navigator.clipboard.writeText(t);toast('Copied. Paste it into any message.');}catch(e){const a=el('textarea',{style:'position:fixed;opacity:0'});a.value=t;document.body.append(a);a.select();try{document.execCommand('copy');toast('Copied.');}catch(x){toast('Press and hold the text to copy it.');}a.remove();}}
+async function shareText(t){if(navigator.share){try{await navigator.share({title:'Emergency at Akagera',text:t});return;}catch(e){if(e&&e.name==='AbortError')return;}}copyText(t);}
+function telLink(n,show,label,cls){return el('a',{class:cls||'emrow',href:'tel:'+n},el('span',{text:label}),el('b',{text:show||n}));}
+function openEmergency(id){
+  if(id){const k=window.EMERGENCY.kinds.find(x=>x.id===id);if(k)EM.kind=k;}
+  const E=window.EMERGENCY,k=EM.kind,p=emPos(),c=LS.get('emc',{});const top=$('sheetBody').scrollTop,reopen=sheetView==='emergency';
+  const nodes=[];
+  nodes.push(el('div',{class:'emwarn'},el('b',{text:'This app cannot call for help by itself.'}),el('span',{text:'Call first. Then share your position below. Stay in your vehicle.'})));
+  nodes.push(el('a',{class:'emcall big',href:'tel:112'},el('span',{text:'📞 Call 112'}),el('small',{text:'Emergency · free'})));
+  nodes.push(el('div',{class:'emgrid'},
+    el('a',{class:'emcall'+(k.call==='park'?' suggest':''),href:'tel:+250786182871'},el('span',{text:'🌿 Park'}),el('small',{text:'+250 786 182 871'})),
+    el('a',{class:'emcall'+(k.call==='912'?' suggest':''),href:'tel:912'},el('span',{text:'🚑 Ambulance'}),el('small',{text:'912'}))));
+  if(c.phone)nodes.push(telLink(c.phone,c.phone,`📱 ${c.name||'My emergency contact'}`,'emrow mine'));
+  if(c.otherPhone)nodes.push(telLink(c.otherPhone,c.otherPhone,`🏛️ ${c.other||'Embassy or insurer'}`,'emrow mine'));
+  nodes.push(el('p',{class:'lbl',text:'What is the problem?'}));
+  nodes.push(el('div',{class:'kinds'},...E.kinds.map(x=>{const b=el('button',{type:'button',class:x.id===k.id?'on':'','aria-pressed':String(x.id===k.id)},el('span',{text:x.icon}),x.label);b.onclick=()=>openEmergency(x.id);return b;})));
+  nodes.push(el('p',{class:'lbl',text:'My position'}));
+  if(!p){nodes.push(el('div',{class:'locbox'},el('p',{text:'No position yet. The message needs one.'}),el('button',{class:'primary blue',type:'button',onclick:()=>{pendingAfterPos=()=>openEmergency();openSetPos();},text:'Set my position'})));}
+  else{
+    const msg=emText(k,p),enc=encodeURIComponent(msg),la=p.lat.toFixed(5),lo=p.lon.toFixed(5);
+    const src=p.gps?(p.stale>120e3?`Last GPS position, ${ago(Date.now()-p.stale)}. Move on and refresh when you have a fix.`:`GPS, accurate to about ${Math.round(S.gps.acc||20)} m`):'Set by hand. It may be off by up to 1 km, so also read the number on the nearest junction stone.';
+    nodes.push(el('div',{class:'posbox'},el('div',{class:'coords',text:`${la}, ${lo}`}),el('p',{text:whereText(p.x,p.y)+'.'}),el('small',{text:src}),
+      el('div',{class:'acts'},el('button',{class:'secondary',type:'button',onclick:()=>openEmergency(),text:'↻ Refresh'}),el('button',{class:'secondary',type:'button',onclick:()=>{pendingAfterPos=()=>openEmergency();openSetPos();},text:'Set by hand'}))));
+    nodes.push(el('pre',{class:'emmsg',text:msg}));
+    nodes.push(el('button',{class:'primary',type:'button',onclick:()=>shareText(msg),text:'📤 Share my position'}));
+    nodes.push(el('div',{class:'acts'},
+      el('a',{class:'secondary',href:'https://wa.me/?text='+enc,target:'_blank',rel:'noopener',text:'WhatsApp'}),
+      el('a',{class:'secondary',href:`sms:${c.phone||''}?&body=${enc}`,text:c.phone?`SMS ${c.name||'contact'}`:'SMS'}),
+      el('button',{class:'secondary',type:'button',onclick:()=>copyText(msg),text:'Copy'})));
+    if(k.warn){const sent=EM.sent&&allReports().some(r=>r.id===EM.sent&&alive(r));
+      nodes.push(sent?el('div',{class:'acts'},el('div',{class:'secondary ok',style:'flex:2',text:'✓ Nearby drivers are warned'}),el('button',{class:'secondary no',type:'button',onclick:cancelWarn,text:'Cancel alert'}))
+        :el('button',{class:'secondary sosbtn',type:'button',onclick:warnDrivers,text:'🆘 Warn other drivers using this app'}));
+      nodes.push(el('p',{class:'fine',text:S.fs?'Shows a red pin on everyone\'s map and in the park chat. It does not alert rescue services.':'You are not connected to the shared database, so only this phone would see the pin.'}));}
+  }
+  nodes.push(el('p',{class:'lbl',text:'While you wait'}));
+  nodes.push(el('ul',{class:'waitlist'},...E.wait.map(t=>el('li',{text:t}))));
+  nodes.push(el('details',{class:'rules'},el('summary',{text:'All emergency numbers'}),
+    ...[['Rwanda',E.national],['Akagera and lodges',E.park],['Nearest hospital',E.medical]].flatMap(([t,a])=>[el('p',{class:'lbl',text:t}),...a.map(x=>el('div',{class:'numrow'},telLink(x.n,x.show||x.n,x.name),el('small',{text:x.note})))]),
+    el('p',{class:'fine',text:`Numbers checked ${E.checked} (gov.rw, Rwanda National Police, African Parks, lodge listings, UK government medical list). They can change, so confirm the park line when you arrive.`})));
+  const nm=el('input',{class:'search',id:'emc-name',maxlength:'30',placeholder:'Name, e.g. Anna (sister)','aria-label':'Emergency contact name'});nm.value=c.name||'';
+  const ph=el('input',{class:'search',id:'emc-phone',type:'tel',inputmode:'tel',maxlength:'20',placeholder:'Phone with country code, e.g. +46…','aria-label':'Emergency contact phone'});ph.value=c.phone||'';
+  const on=el('input',{class:'search',id:'emc-other',maxlength:'30',placeholder:'Embassy or insurer, e.g. Swedish Embassy','aria-label':'Embassy or insurer name'});on.value=c.other||'';
+  const op=el('input',{class:'search',id:'emc-ophone',type:'tel',inputmode:'tel',maxlength:'20',placeholder:'Their phone number','aria-label':'Embassy or insurer phone'});op.value=c.otherPhone||'';
+  const savec=()=>{LS.set('emc',{name:nm.value.trim(),phone:ph.value.replace(/[^+\d]/g,''),other:on.value.trim(),otherPhone:op.value.replace(/[^+\d]/g,'')});toast('Saved on this phone only.');openEmergency();};
+  nodes.push(el('details',{class:'rules'},el('summary',{text:'My emergency contacts (saved on this phone)'}),el('p',{class:'hint',text:'They appear as call buttons at the top and the SMS goes straight to your contact. Nothing is sent to the shared database.'}),nm,ph,on,op,el('button',{class:'primary',type:'button',onclick:savec,text:'Save contacts'})));
+  openSheet('Emergency help',nodes,{view:'emergency'});
+  if(reopen)$('sheetBody').scrollTop=top;
+}
+function warnDrivers(){
+  const p=emPos();if(!p){toast('Set your position first.');return;}
+  const k=EM.kind,w=emWho(),now=Date.now();
+  const note=`${k.label}. ${w?vehLabel(w)+(w.party?', '+w.party:''):''}`.trim().slice(0,200);
+  const rec={id:'r'+now.toString(36)+Math.random().toString(36).slice(2,6),kind:'road',type:'sos',sev:'1',lat:+p.lat.toFixed(6),lon:+p.lon.toFixed(6),at:now,lastSeen:now,by:S.device,votes:{},note};
+  if(passValid()&&S.fs&&S.fs.uid&&LS.get('showName',true))rec.uid=S.fs.uid;
+  saveReport(rec);EM.sent=rec.id;
+  if(passValid()&&SOC.profile.chat)sendChat(`🆘 ${k.label}. Can anyone nearby help, or tell the park?`,rec);
+  toast(S.fs?'Drivers using the app are warned. Now call the park.':'Saved on this phone only. Call the park now.');
+  setTimeout(()=>openEmergency(),50);
+}
+function cancelWarn(){if(!EM.sent)return;patchReport({id:EM.sent},{votes:{[S.device]:-1}});EM.sent=null;toast('Alert cancelled.');setTimeout(()=>openEmergency(),150);}
+const SOSSEEN=new Set();
+function checkSOS(){
+  const p=myPos();if(!p)return;
+  for(const r of allReports()){
+    if(r.kind!=='road'||r.type!=='sos'||r.example||r.by===S.device||r.id===EM.sent||SOSSEEN.has(r.id)||!alive(r)||Date.now()-r.at>3*3600e3)continue;
+    const q=merc(r.lon,r.lat),d=gd(p.x,p.y,q[0],q[1]);if(d>25000)continue;SOSSEEN.add(r.id);
+    toast(`🆘 A driver needs help ${fmtD(d)} ${DIRS[dir8(brg(p.x,p.y,q[0],q[1]))]} of you`,'Open',()=>openReportView(r),14000);
+    if(S.nav&&S.set.voice)say('A driver nearby needs help.');
+  }
+}
+$('sosBtn').onclick=()=>openEmergency();$('sosMini').onclick=()=>openEmergency();
+
+/* =========================================================================
    12. Weather sheet, settings
    ========================================================================= */
 function openWeather(){
@@ -1293,7 +1427,7 @@ function saveSet(){LS.set('settings',S.set);}
 function openSettings(){
   const tog=(key,label)=>{const i=el('input',{type:'checkbox',id:'set-'+key});i.checked=!!S.set[key];i.onchange=()=>{S.set[key]=i.checked;saveSet();if(key==='sat')setSat(i.checked);redraw();};return el('label',{class:'toggle',for:'set-'+key},label,i);};
   const cfg=window.AKAGERA_FIREBASE;
-  const nodes=[tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),
+  const nodes=[el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help'}),tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();if(S.sim){stopSim();toast('Demo drive stopped.');}else{if(!S.route){toast('Pick a destination with Go first.');return;}startNav();startSim();}},text:S.sim?'Stop demo drive':'Demo drive along the planned route'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();startPick('me');},text:'Set my position by hand'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{S.set.hideEx=!S.set.hideEx;saveSet();closeSheet();redraw();},text:S.set.hideEx?'Show example reports':'Hide example reports'}),
@@ -1303,7 +1437,7 @@ function openSettings(){
     el('p',{class:'fine',text:'Junction stones, ranger posts and fence houses: from the park board, accurate to about 1 km. Satellite: Esri World Imagery. Weather: Open-Meteo.'})];
   openSheet('Settings',nodes,{view:'settings'});
 }
-$('setBtn').onclick=openSettings;$('meBtn').onclick=()=>openPass();$('chatBtn').onclick=()=>passValid()?openChat(SOC.profile.chat?'park':'park'):openPass();$('syncPill').onclick=openSettings;
+$('setBtn').onclick=openSettings;$('meBtn').onclick=()=>openPass();$('chatBtn').onclick=()=>passValid()?openChat('park'):(passExists()?showPass():openPass());$('syncPill').onclick=openSettings;
 $('reportBtn').onclick=()=>startReport();$('findBtn').onclick=()=>openFind();$('goBtn').onclick=openGo;
 
 /* =========================================================================
@@ -1317,14 +1451,14 @@ async function boot(){
   new ResizeObserver(()=>resize()).observe(cv);resize();fitPark();
   if(document.fonts&&document.fonts.ready)document.fonts.ready.then(redraw);
   updateWxPill();setSync();updateGpsLine();updateCount();setSat(!!S.set.sat);updateMeBtn();updateChatBadge();
-  startGPS();loadWeather();initSharing();loadPhotos();
+  startGPS();loadWeather();initSharing();loadPhotos();setTimeout(socTick,2500);
   window.addEventListener('online',loadPhotos);
-  setInterval(()=>{loadWeather();redraw();updateGpsLine();if(SOC.profile&&!passValid()){endSocial();SOC.profile=null;LS.set('pass',null);toast('Your trip pass has ended and was deleted.');}},60e3);
+  setInterval(()=>{loadWeather();redraw();updateGpsLine();socTick();},60e3);
   window.addEventListener('online',()=>loadWeather(true));
   // follow GPS in browse mode
   setInterval(()=>{if(!S.nav&&S.follow){const p=myPos();if(p&&p.gps){cam.cx=p.x;cam.cy=p.y;redraw();}}},1000);
   if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
   if(!S.set.hideEx&&allReports().some(r=>r.example))banner('No live reports yet. Pins marked EXAMPLE are samples.','Hide',()=>{S.set.hideEx=true;saveSet();hideBanner();redraw();},'ex');
-  window.AKL=S;window.AKLf={route,snap,merc,penalties,roadLife,openWeather,updateWxPill};   // for debugging
+  window.AKL=S;window.AKLf={route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
 }
 boot();

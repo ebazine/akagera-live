@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    // a pass counts only between its first and last day
+    function hasPass() {
+      return signedIn()
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.startsAt <= request.time
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.expiresAt > request.time;
+    }
+
+    match /reports/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['kind','type','lat','lon','at','lastSeen','by','votes','count','heading','act','rdist','sev','note','uid'])
+        && request.resource.data.kind in ['animal','road']
+        && request.resource.data.type is string && request.resource.data.type.size() < 20
+        && request.resource.data.lat is number && request.resource.data.lat > -2.3 && request.resource.data.lat < -1.0
+        && request.resource.data.lon is number && request.resource.data.lon > 30.2 && request.resource.data.lon < 31.2
+        && request.resource.data.at is number
+        && request.resource.data.note is string && request.resource.data.note.size() <= 200
+        && (!('uid' in request.resource.data) || (signedIn() && request.resource.data.uid == request.auth.uid));
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes','lastSeen','note','act','rdist'])
+        && request.resource.data.note is string && request.resource.data.note.size() <= 200;
+      allow delete: if false;
+    }
+
+    // visible pass: other drivers can see it only while it is active (the app hides it outside the dates);
+    // any signed-in phone may delete a pass once it has ended
+    match /profiles/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name','vehicle','color','party','emoji','chat','createdAt','startsAt','expiresAt','lastSeen'])
+        && request.resource.data.name is string && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 30
+        && request.resource.data.vehicle is string && request.resource.data.vehicle.size() <= 40
+        && request.resource.data.party is string && request.resource.data.party.size() <= 40
+        && request.resource.data.startsAt is timestamp && request.resource.data.expiresAt is timestamp
+        && request.resource.data.startsAt <= request.resource.data.expiresAt
+        && request.resource.data.expiresAt < request.resource.data.startsAt + duration.value(8, 'd')
+        && request.resource.data.startsAt < request.time + duration.value(31, 'd');
+      allow delete: if signedIn() && (request.auth.uid == uid || resource.data.expiresAt < request.time);
+    }
+
+    // private trip record, kept 30 days after the last day; only its owner can read it
+    match /trips/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name','vehicle','color','party','startsAt','endsAt','retainUntil','createdAt'])
+        && request.resource.data.retainUntil is timestamp
+        && request.resource.data.retainUntil < request.time + duration.value(75, 'd');
+      allow delete: if signedIn() && (request.auth.uid == uid || resource.data.retainUntil < request.time);
+    }
+
+    match /chat/{id} {
+      allow read: if hasPass();
+      allow create: if hasPass() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid','name','emoji','vehicle','text','at','expiresAt','kind','rep'])
+        && request.resource.data.text is string && request.resource.data.text.size() <= 500
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt < request.time + duration.value(2, 'd');
+      allow delete: if signedIn() && (resource.data.uid == request.auth.uid || resource.data.expiresAt < request.time);
+    }
+
+    match /dms/{pair} {
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow create: if hasPass() && request.auth.uid in request.resource.data.members
+        && request.resource.data.members.size() == 2
+        && pair == request.resource.data.members[0] + '_' + request.resource.data.members[1];
+      allow update: if signedIn() && request.auth.uid in resource.data.members
+        && request.resource.data.members == resource.data.members;
+      allow delete: if signedIn() && request.auth.uid in resource.data.members;
+      match /msgs/{id} {
+        allow read: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/dms/$(pair)).data.members;
+        allow create: if hasPass() && request.resource.data.uid == request.auth.uid
+          && request.auth.uid in get(/databases/$(database)/documents/dms/$(pair)).data.members
+          && request.resource.data.text is string && request.resource.data.text.size() <= 500
+          && request.resource.data.expiresAt is timestamp;
+        allow delete: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/dms/$(pair)).data.members;
+      }
+    }
+  }
+}
