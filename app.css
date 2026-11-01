@@ -17,7 +17,7 @@ button{cursor:pointer}
 
 .top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:calc(8px + env(safe-area-inset-top)) 10px 8px 12px;background:var(--bush);color:#F4F1E6;z-index:5}
 .brand{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 auto;overflow:hidden}.brand svg{flex:none}
-.brand b{font-family:var(--f-display);font-size:21px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand b{font-family:var(--f-display);font-size:20px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stat{display:flex;align-items:center;gap:6px;flex:none}
 .pill{border:0;border-radius:999px;padding:6px 10px;font-size:13.5px;font-weight:600;background:rgba(255,255,255,.13);color:#F4F1E6;display:flex;align-items:center;gap:6px;white-space:nowrap;flex:none}
 .pill span{overflow:hidden;text-overflow:ellipsis}
@@ -31,7 +31,8 @@ button{cursor:pointer}
 .mapwrap{position:relative;flex:1;min-height:0;overflow:hidden;background:#E4E8DC}
 .tiltbox{position:absolute;inset:0;transform-origin:50% 100%;transition:transform .5s ease}
 #map{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
-.navmode .tiltbox.tilt{inset:-55% -45% 0 -45%;transform:perspective(1100px) rotateX(46deg)}
+.navmode .mapwrap{background:linear-gradient(#CFE0EC,#E9EEE4 40%)}
+.navmode .tiltbox.tilt{inset:-110% -70% 0 -70%;transform:perspective(1100px) rotateX(40deg)}
 .navmode .top,.navmode .fabcol,.navmode .bottom{display:none}
 
 .fabcol{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:8px;z-index:3}
