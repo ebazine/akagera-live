@@ -1,7 +1,7 @@
 /* Offline support: the app, map data and fonts are cached so the map, your GPS position,
    routing and saved reports keep working without signal in the park. */
-const VERSION = 'akl-v2.0.1';
-const CORE = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'manifest.webmanifest', 'data/board.json', 'data/osm.json', 'icons/icon-192.png', 'icons/icon-512.png'];
+const VERSION = 'akl-v2.1.0';
+const CORE = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'species.js', 'manifest.webmanifest', 'data/board.json', 'data/osm.json', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => Promise.all(CORE.map(u => c.add(u).catch(() => null)))).then(() => self.skipWaiting()));
 });
@@ -12,7 +12,7 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
   if (url.hostname.includes('firestore.googleapis.com') || url.hostname.includes('api.open-meteo.com')) return; // live data: network only
-  if (url.hostname === 'server.arcgisonline.com') {                 // satellite tiles: cache as you browse
+  if (url.hostname === 'server.arcgisonline.com' || url.hostname === 'upload.wikimedia.org') {                 // satellite tiles: cache as you browse
     e.respondWith(caches.open('akl-tiles').then(async c => {
       const hit = await c.match(e.request); if (hit) return hit;
       try { const r = await fetch(e.request); if (r.ok || r.type === 'opaque') c.put(e.request, r.clone()); return r; } catch (err) { return new Response('', {status: 504}); }

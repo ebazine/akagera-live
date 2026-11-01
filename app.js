@@ -5,15 +5,15 @@
 /* =========================================================================
    0. Catalogue
    ========================================================================= */
-const ANIMALS = [
-  ['lion','Lion','🦁'],['elephant','Elephant','🐘'],['rhino','Rhino','🦏'],['leopard','Leopard','🐆'],
-  ['buffalo','Buffalo','🐃'],['giraffe','Giraffe','🦒'],['zebra','Zebra','🦓'],['hippo','Hippo','🦛'],
-  ['croc','Crocodile','🐊'],['hyena','Hyena','🐾'],['topi','Topi','🦌'],['impala','Impala','🦌'],['eland','Eland','🦌'],
-  ['waterbuck','Waterbuck','🦌'],['roan','Roan antelope','🦌'],['warthog','Warthog','🐗'],['baboon','Baboon','🐒'],
-  ['shoebill','Shoebill','🐦'],['bird','Other bird','🦅'],['other','Other animal','🐾']
-];
+const SP = [...window.SPECIES, ...window.SPECIES_EXTRA];
+const SPX = Object.fromEntries(SP.map(x=>[x.id,x]));
+const SHORTNAME = {elephant:'Elephant',giraffe:'Giraffe',zebra:'Zebra',buffalo:'Buffalo',croc:'Crocodile',hyena:'Hyena',warthog:'Warthog',jackal:'Jackal',waterbuck:'Waterbuck',eland:'Eland',reedbuck:'Reedbuck',duiker:'Duiker',baboon:'Baboon',vervet:'Vervet monkey',fisheagle:'Fish eagle',crane:'Crowned crane',pelican:'Pelican',marabou:'Marabou stork',roan:'Roan antelope',hippo:'Hippo',rhino:'Rhino',bird:'Bird',other:'Animal'};
+const ANIMALS = SP.map(x=>[x.id,SHORTNAME[x.id]||x.name,x.emoji]);
 const TOP_ANIMALS = ['lion','elephant','rhino','leopard','buffalo','giraffe','zebra','hippo'];
-const PLURAL = {buffalo:'Buffalo',topi:'Topi',waterbuck:'Waterbuck',eland:'Eland',impala:'Impala',rhino:'Rhinos',bird:'Birds',other:'Animals'};
+const PLURAL = {buffalo:'Buffalo',topi:'Topi',waterbuck:'Waterbuck',eland:'Eland',impala:'Impala',oribi:'Oribi',reedbuck:'Reedbuck',bushbuck:'Bushbuck',sitatunga:'Sitatunga',rhino:'Rhinos',rhino_b:'Black rhinos',rhino_w:'White rhinos',bird:'Birds',other:'Animals',fisheagle:'Fish eagles',crane:'Crowned cranes',vervet:'Vervet monkeys',marabou:'Marabou storks',roan:'Roan antelope',croc:'Crocodiles',hippo:'Hippos'};
+const DANGER = [['Harmless','#2E7D4F'],['Keep your distance','#C98A00'],['Dangerous','#E0670F'],['Very dangerous','#C0392B']];
+const RARITY = ['','Common','Regular','Uncommon','Rare'];
+const POINTS = [0,5,10,20,40];
 /* road types: life = hours when the weather does not matter; wet types dry out after rain stops */
 const ROADS = [
   ['mud','Mud / slippery','🟤',{wet:true,base:24,dry:12,perMm:1.5,cap:96}],
@@ -68,7 +68,7 @@ const S = {
   board:null, osm:null, layers:{}, pois:[], juncs:[], named:[], park:null,
   graph:null, grid:null,
   gps:{ok:false,denied:false,x:0,y:0,lat:0,lon:0,acc:0,heading:null,speed:0,t:0},
-  manual: LS.get('manual', null),
+  manual: LS.get('manual', null), useManual: LS.get('useManual', false),
   live:[], local: LS.get('local', []), sync:'local', fs:null,
   wx: LS.get('wx', null),
   route:null, nav:null,
@@ -311,7 +311,7 @@ function updateWxPill(){
 function clean(id,d){
   if(!d||typeof d!=='object')return null;
   const kind=d.kind==='road'?'road':d.kind==='animal'?'animal':null;if(!kind)return null;
-  let type=String(d.type||'');if(type==='rhino_b'||type==='rhino_w')type='rhino';
+  let type=String(d.type||'');
   if(kind==='animal'&&!AN[type])return null;if(kind==='road'&&!RD[type])return null;
   const lat=+d.lat,lon=+d.lon;if(!(lat<-1.0&&lat>-2.3&&lon>30.2&&lon<31.2))return null;
   const at=+d.at;if(!(at>1.6e12))return null;
@@ -350,7 +350,7 @@ function setSync(){
   else {p.classList.add('err');t.textContent='Local';}
 }
 async function saveReport(rec){
-  if(S.fs){const {F,db}=S.fs;F.setDoc(F.doc(db,'reports',rec.id),rec).catch(e=>toast('Could not share the report: '+(e.code||'error')));}
+  if(S.fs){const {F,db}=S.fs;const {id,...data}=rec;F.setDoc(F.doc(db,'reports',id),data).catch(e=>toast(e&&e.code==='permission-denied'?'The shared database refused the report. Check that the Firestore rules from the README are published.':'Could not share the report: '+(e.code||'error'),null,null,7000));}
   else {S.local.push(rec);LS.set('local',S.local);}
   S.set.hideEx=true;saveSet();hideBanner();redraw();setSync();
 }
@@ -389,9 +389,51 @@ function label(r){if(r.kind==='animal'){const a=AN[r.type];const many=r.count&&r
 const emoji=r=>r.kind==='animal'?AN[r.type][2]:RD[r.type][2];
 
 /* =========================================================================
+   6b. Animal photos (Wikipedia / Wikimedia Commons) and the score sheet
+   ========================================================================= */
+const PH={url:LS.get('photos',{}),page:LS.get('photoPages',{}),img:{}};
+async function loadPhotos(){
+  if(!navigator.onLine)return;
+  const todo=SP.filter(x=>x.wiki&&!PH.url[x.id]);
+  for(let i=0;i<todo.length;i+=4){
+    await Promise.all(todo.slice(i,i+4).map(async x=>{try{
+      const r=await fetch('https://en.wikipedia.org/api/rest_v1/page/summary/'+encodeURIComponent(x.wiki));if(!r.ok)return;
+      const j=await r.json();if(j.type==='disambiguation')return;const u=(j.thumbnail&&j.thumbnail.source)||(j.originalimage&&j.originalimage.source);
+      if(u){PH.url[x.id]=u;PH.page[x.id]=(j.content_urls&&j.content_urls.mobile&&j.content_urls.mobile.page)||('https://en.wikipedia.org/wiki/'+x.wiki);}
+    }catch(e){}}));
+  }
+  LS.set('photos',PH.url);LS.set('photoPages',PH.page);
+  for(const x of SP)photoImg(x.id);            // warm the offline cache
+  redraw();refreshSheet();
+}
+function photoImg(id){const u=PH.url[id];if(!u)return null;let im=PH.img[id];if(!im){im=new Image();im.decoding='async';im.onload=()=>redraw();im.src=u;PH.img[id]=im;}return im.complete&&im.naturalWidth?im:null;}
+function pic(id,size=44,cls=''){const x=SPX[id];const w=el('span',{class:'pic '+cls,style:`width:${size}px;height:${size}px;font-size:${Math.round(size*.6)}px`});const u=PH.url[id];
+  if(u){const i=el('img',{src:u,alt:'',loading:'lazy',decoding:'async'});i.onerror=()=>{w.replaceChildren(document.createTextNode(x?x.emoji:'🐾'));};w.append(i);}else w.textContent=x?x.emoji:'🐾';return w;}
+/* score sheet */
+S.life=LS.get('life',{});
+const LISTED=window.SPECIES;
+function tick(id,how){const sp=SPX[id];if(!sp)return null;const had=S.life[id];
+  if(had&&(had.how==='report'||how!=='report'))return null;
+  S.life[id]={t:had?had.t:Date.now(),how};LS.set('life',S.life);
+  const before=earnedBadges().map(b=>b.id);setTimeout(()=>{const nb=earnedBadges().filter(b=>!before.includes(b.id));for(const b of nb)setTimeout(()=>toast(`Badge earned: ${b.icon} ${b.name} +${b.bonus} points`),5200);},10);
+  return had?null:(POINTS[sp.rarity]||0);}
+function untick(id){delete S.life[id];LS.set('life',S.life);}
+const has=id=>!!S.life[id];
+function earnedBadges(){return window.BADGES.filter(b=>b.need.every(group=>group.some(has)));}
+function score(){let pts=0,n=0;for(const x of LISTED){if(has(x.id)){pts+=POINTS[x.rarity]||0;n++;}}const badges=earnedBadges();for(const b of badges)pts+=b.bonus;
+  let lv=window.LEVELS[0],next=null;for(let i=0;i<window.LEVELS.length;i++){if(pts>=window.LEVELS[i][0]){lv=window.LEVELS[i];next=window.LEVELS[i+1]||null;}}
+  return {pts,n,total:LISTED.length,badges,lv,next};}
+
+/* =========================================================================
    7. Position: GPS, manual fallback, demo drive
    ========================================================================= */
-function myPos(){const g=S.gps;if(g.ok&&Date.now()-g.t<90e3)return {x:g.x,y:g.y,lat:g.lat,lon:g.lon,gps:true,heading:g.heading,speed:g.speed};if(S.manual){const q=merc(S.manual.lon,S.manual.lat);return {x:q[0],y:q[1],lat:S.manual.lat,lon:S.manual.lon,gps:false,heading:null};}return null;}
+function myPos(){const g=S.gps,gpsOk=g.ok&&Date.now()-g.t<90e3;const G_={x:g.x,y:g.y,lat:g.lat,lon:g.lon,gps:true,heading:g.heading,speed:g.speed};
+  if(S.sim&&gpsOk)return G_;
+  const man=()=>{const q=merc(S.manual.lon,S.manual.lat);return {x:q[0],y:q[1],lat:S.manual.lat,lon:S.manual.lon,gps:false,heading:null};};
+  if(S.useManual&&S.manual)return man();if(gpsOk)return G_;if(S.manual)return man();return null;}
+function setManual(lat,lon,msg){S.manual={lat,lon,at:Date.now()};S.useManual=true;LS.set('manual',S.manual);LS.set('useManual',true);updateGpsLine();redraw();if(msg)toast(msg);if(pendingAfterPos){const f=pendingAfterPos;pendingAfterPos=null;setTimeout(f,50);}}
+function useGPS(){S.useManual=false;LS.set('useManual',false);updateGpsLine();redraw();const p=myPos();if(p&&p.gps){S.follow=true;$('followBtn').classList.add('on');centerOn(p.x,p.y,Math.max(cam.s,.03));}}
+function outsideBy(p){if(inRing(p.x,p.y,S.park))return 0;let b=1e18;for(const q of S.park){const d=gd(p.x,p.y,q[0],q[1]);if(d<b)b=d;}return b;}
 let lastFix=null;
 function onFix(c,sim){
   const g=S.gps;const [x,y]=merc(c.longitude,c.latitude);
@@ -409,8 +451,8 @@ function startGPS(){
 function updateGpsLine(){
   const b=$('gpsline');const p=myPos();
   if(!p){b.replaceChildren(S.gps.denied?el('span',null,el('b',{text:'Location is blocked. '}),'Allow it in your browser settings, or tap here to set your position.'):el('span',null,el('b',{text:'Waiting for GPS… '}),'Tap here to set your position by hand.'));return;}
-  const where=whereText(p.x,p.y,true);
-  b.replaceChildren(el('b',{text:p.gps?(S.gps.sim?'Demo drive: ':`GPS ±${Math.round(S.gps.acc)} m: `):'Set by hand: '}),where);
+  const where=whereText(p.x,p.y,true);const out=p.gps?outsideBy(p):0;
+  b.replaceChildren(el('b',{text:p.gps?(S.gps.sim?'Demo drive: ':`GPS ±${Math.round(S.gps.acc)} m: `):'Set by hand: '}),where,out>2000?el('span',{text:' · tap to set a spot in the park'}):'');
 }
 function whereText(x,y,short){
   if(!inRing(x,y,S.park)){let best=1e18;for(const q of S.park){const d=gd(x,y,q[0],q[1]);if(d<best)best=d;}if(best>2000)return `${fmtD(best)} outside the park`;}
@@ -484,13 +526,15 @@ function textLbl(t,x,y,font,fill,align='center',force=false){ctx.font=font;const
 const SEVCOL={'1':'#C98A00','2':'#E0670F','3':'#C0392B'};
 function drawReport(r,x,y,sel){
   const age=Date.now()-(r.lastSeen||r.at);const alpha=r.kind==='animal'?Math.max(.55,1-age/((S.animalWin||6)*3600e3)*.45):1;
-  const ring=r.kind==='animal'?'#2E7D4F':SEVCOL[r.sev||'1'];const R=sel?22:17;
+  const ring=r.kind==='animal'?'#2E7D4F':SEVCOL[r.sev||'1'];const R=sel?23:(r.kind==='animal'?19:17);
   ctx.save();ctx.globalAlpha=alpha;
   if(r.kind==='animal'&&r.heading!=null&&r.heading>=0){const a=(r.heading*45)*RAD+cam.rot-Math.PI/2,L=46;ctx.setLineDash([5,4]);ctx.lineWidth=3;ctx.strokeStyle=ring;ctx.beginPath();ctx.moveTo(x+Math.cos(a)*R,y+Math.sin(a)*R);ctx.lineTo(x+Math.cos(a)*L,y+Math.sin(a)*L);ctx.stroke();ctx.setLineDash([]);const tx=x+Math.cos(a)*(L+6),ty=y+Math.sin(a)*(L+6);ctx.beginPath();ctx.moveTo(tx,ty);ctx.lineTo(tx-Math.cos(a-.5)*12,ty-Math.sin(a-.5)*12);ctx.lineTo(tx-Math.cos(a+.5)*12,ty-Math.sin(a+.5)*12);ctx.closePath();ctx.fillStyle=ring;ctx.fill();}
   ctx.shadowColor='rgba(0,0,0,.3)';ctx.shadowBlur=6;ctx.shadowOffsetY=2;ctx.beginPath();ctx.arc(x,y,R,0,7);ctx.fillStyle='#fff';ctx.fill();ctx.shadowColor='transparent';
   ctx.lineWidth=r.kind==='road'?4:3.5;ctx.strokeStyle=ring;if(r.example)ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);
   if(r.kind==='road'){ctx.beginPath();ctx.moveTo(x,y-R-9);ctx.lineTo(x-6,y-R-1);ctx.lineTo(x+6,y-R-1);ctx.closePath();ctx.fillStyle=ring;ctx.fill();}
-  ctx.font=`${Math.round(R*1.05)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#000';ctx.fillText(emoji(r),x,y+1);
+  const im=r.kind==='animal'?photoImg(r.type):null;
+  if(im){ctx.save();ctx.beginPath();ctx.arc(x,y,R-2.5,0,7);ctx.clip();const sq=Math.min(im.naturalWidth,im.naturalHeight);ctx.drawImage(im,(im.naturalWidth-sq)/2,(im.naturalHeight-sq)/2,sq,sq,x-R+2.5,y-R+2.5,2*R-5,2*R-5);ctx.restore();}
+  else{ctx.font=`${Math.round(R*1.05)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#000';ctx.fillText(emoji(r),x,y+1);}
   if(r.kind==='animal'&&r.count&&r.count!=='1'){ctx.font='700 12px Barlow,sans-serif';const w=ctx.measureText(r.count).width+10;ctx.fillStyle=ring;ctx.beginPath();ctx.roundRect(x+R-10,y-R-6,w,17,8.5);ctx.fill();ctx.fillStyle='#fff';ctx.textAlign='left';ctx.fillText(r.count,x+R-5,y-R+2.5);}
   const tl=r.example?'EXAMPLE':r.pending?'SENDING':hhmm(r.lastSeen||r.at);
   ctx.font='700 11.5px Barlow,sans-serif';const w=ctx.measureText(tl).width+10;ctx.fillStyle=r.example?'#6B5200':r.pending?'#1E3A24':'rgba(26,34,25,.88)';ctx.beginPath();ctx.roundRect(x-w/2,y+R+3,w,16,8);ctx.fill();ctx.fillStyle='#fff';ctx.textAlign='center';ctx.fillText(tl,x,y+R+11.5);
@@ -574,7 +618,7 @@ $('followBtn').onclick=()=>{const p=myPos();if(!p){openSetPos();return;}S.follow
 let pickPin=null;
 function onTap(x,y){
   if(pickMode){const [wx,wy]=s2w(x,y);const u=unmerc(wx,wy);const k=pickMode;endPick();
-    if(k==='me'){S.manual={lat:u.lat,lon:u.lon,at:Date.now()};LS.set('manual',S.manual);updateGpsLine();toast('Position set.');if(pendingAfterPos){const f=pendingAfterPos;pendingAfterPos=null;f();}}
+    if(k==='me'){setManual(u.lat,u.lon,'Position set by hand.');}
     else if(k==='dest'){previewRoute({x:wx,y:wy,name:'Dropped pin'});}
     redraw();return;}
   for(const h of hits)if(h.t==='rep'&&Math.hypot(h.x-x,h.y-y)<h.r2){openReportView(h.r);return;}
@@ -590,43 +634,54 @@ function openSheet(title,nodes,o={}){$('sheetTitle').textContent=title;$('sheetB
   const dots=$('sheetDots');dots.replaceChildren();if(o.step){for(let i=1;i<=o.step[1];i++)dots.append(el('i',{class:i<=o.step[0]?'on':''}));}$('sheetBody').scrollTop=0;}
 function closeSheet(){$('sheet').hidden=true;sheetView=null;selected=null;redraw();}
 $('sheetClose').onclick=closeSheet;$('sheetBack').onclick=()=>backFn&&backFn();
-function refreshSheet(){if($('sheet').hidden)return;if(sheetView==='find')openFind();else if(sheetView&&sheetView.startsWith('rep:')){const r=allReports().find(x=>x.id===sheetView.slice(4));if(r)openReportView(r,true);}}
+function refreshSheet(){if($('sheet').hidden)return;if(sheetView==='find')openFind('sightings');else if(sheetView==='guide')openFind('guide');else if(sheetView==='list')openFind('list');else if(sheetView&&sheetView.startsWith('species:'))openSpecies(sheetView.slice(8));else if(sheetView&&sheetView.startsWith('rep:')){const r=allReports().find(x=>x.id===sheetView.slice(4));if(r)openReportView(r,true);}}
 let toastT=null;
-function toast(t,btn,fn,ms=3600){const e=$('toast');e.replaceChildren(el('span',{text:t}),btn?el('button',{type:'button',onclick:()=>{e.hidden=true;fn();},text:btn}):null);e.hidden=false;e.style.bottom=S.nav?'calc(100px + env(safe-area-inset-bottom))':'';clearTimeout(toastT);toastT=setTimeout(()=>e.hidden=true,ms);}
-function banner(text,btn,fn,cls){const b=$('banner');b.className='banner'+(cls?' '+cls:'');b.replaceChildren(el('p',{text}),btn?el('button',{type:'button',onclick:fn,text:btn}):null);b.hidden=false;}
+function toast(t,btn,fn,ms=3600){const e=$('toast');e.replaceChildren(...[el('span',{text:t}),btn?el('button',{type:'button',onclick:()=>{e.hidden=true;fn();},text:btn}):null].filter(Boolean));e.hidden=false;const up=!$('sheet').hidden;e.style.top=up?'calc(12px + env(safe-area-inset-top))':'';e.style.bottom=up?'auto':S.nav?'calc(100px + env(safe-area-inset-bottom))':'';clearTimeout(toastT);toastT=setTimeout(()=>e.hidden=true,ms);}
+function banner(text,btn,fn,cls){const b=$('banner');b.className='banner'+(cls?' '+cls:'');b.replaceChildren(...[el('p',{text}),btn?el('button',{type:'button',onclick:fn,text:btn}):null].filter(Boolean));b.hidden=false;}
 function hideBanner(){$('banner').hidden=true;}
 function startPick(kind){pickMode=kind;$('sheet').hidden=true;banner(kind==='me'?'Tap the map where you are.':'Tap the map where you want to go.','Cancel',()=>endPick());}
 function endPick(){pickMode=null;hideBanner();}
 function needPos(then){const p=myPos();if(p)return p;pendingAfterPos=then;openSetPos();return null;}
 function openSetPos(){
-  openSheet('Where are you?',[
-    el('p',{class:'hint',text:S.gps.denied?'Location is blocked for this site. Allow it in your browser settings for the best experience. For now, set your position by hand.':'Waiting for GPS. You can set your position by hand meanwhile.'}),
-    el('button',{class:'primary blue',type:'button',onclick:()=>startPick('me'),text:'Tap my spot on the map'}),
+  const g=S.gps,gpsOk=g.ok&&Date.now()-g.t<90e3;const nodes=[];
+  if(gpsOk){const q=merc(g.lon,g.lat);const out=outsideBy({x:q[0],y:q[1]});
+    nodes.push(el('div',{class:'locbox'},el('p',{text:out>2000?`Your phone's GPS puts you ${fmtD(out)} outside the park. Set a position in the park by hand to plan routes and report from there.`:`GPS works: ${whereText(q[0],q[1])}.`}),
+      el('button',{class:S.useManual?'primary blue':'secondary',type:'button',onclick:()=>{closeSheet();useGPS();toast('Following your GPS.');},text:S.useManual?'Use my GPS again':'Using GPS now · centre on me'})));}
+  else nodes.push(el('p',{class:'hint',text:g.denied?'Location is blocked for this site. Allow it in your browser settings to be guided by GPS. You can set your position by hand meanwhile.':'Waiting for GPS. You can set your position by hand meanwhile.'}));
+  if(S.useManual&&S.manual){const q=merc(S.manual.lon,S.manual.lat);nodes.push(el('p',{class:'fine',text:`Set by hand ${ago(S.manual.at)}: ${whereText(q[0],q[1])}.`}));}
+  nodes.push(el('button',{class:'primary',type:'button',onclick:()=>startPick('me'),text:'Tap my spot on the map'}),
     el('p',{class:'lbl',text:'Or pick the junction stone you are at'}),
-    el('div',{class:'grid3',style:'grid-template-columns:repeat(auto-fill,minmax(60px,1fr))'},...S.juncs.map(j=>el('button',{type:'button',style:'min-height:56px;font-size:18px',onclick:()=>{S.manual={lat:j.lat,lon:j.lon,at:Date.now()};LS.set('manual',S.manual);closeSheet();updateGpsLine();centerOn(j.x,j.y,Math.max(cam.s,.05));if(pendingAfterPos){const f=pendingAfterPos;pendingAfterPos=null;f();}},text:String(j.num)})))
-  ],{view:'pos'});
+    el('div',{class:'grid3',style:'grid-template-columns:repeat(auto-fill,minmax(60px,1fr))'},...S.juncs.map(j=>el('button',{type:'button',style:'min-height:56px;font-size:18px',onclick:()=>{closeSheet();centerOn(j.x,j.y,Math.max(cam.s,.05));setManual(j.lat,j.lon,`Position set at junction ${j.num}.`);},text:String(j.num)}))));
+  openSheet('Your position',nodes,{view:'pos'});
 }
-$('gpsline').onclick=()=>{const p=myPos();if(p&&p.gps){S.follow=true;$('followBtn').classList.add('on');centerOn(p.x,p.y,Math.max(cam.s,.05));}else openSetPos();};
+$('gpsline').onclick=()=>openSetPos();
 
 /* ---------- report: one question per screen ---------- */
 let D=null;
-function startReport(){
-  const p=needPos(startReport);if(!p)return;
+function startReport(preset){
+  const p=needPos(()=>startReport(preset));if(!p)return;
+  const out=outsideBy(p);
+  if(out>3000){pendingAfterPos=()=>startReport(preset);openSheet('You are outside the park',[el('p',{class:'hint',text:`Your position is ${fmtD(out)} outside the park, so a report would put the animal in the wrong place. Set where you are in the park first.`}),el('button',{class:'primary',type:'button',onclick:()=>startPick('me'),text:'Tap my spot on the map'}),el('button',{class:'secondary',type:'button',onclick:openSetPos,text:'Pick a junction stone'})],{view:'outside'});return;}
   const h=p.gps&&S.gps.heading!=null&&(S.gps.speed>1||Date.now()-S.gps.t<30e3)?S.gps.heading:null;
   D={lat:p.lat,lon:p.lon,car:h};
+  if(preset){D.kind='animal';D.type=preset;stepCount();return;}
   openSheet('What did you see?',[el('div',{class:'huge'},
       el('button',{type:'button',onclick:()=>{D.kind='animal';stepSpecies();}},el('span',{text:'🦁'}),'Animals'),
       el('button',{type:'button',onclick:()=>{D.kind='road';stepRoadType();}},el('span',{text:'🚧'}),'Road problem')),
-    el('p',{class:'fine',text:`Uses your position: ${whereText(...merc(p.lon,p.lat))}.`})],{step:[1,4],view:'r1'});
+    el('p',{class:'fine',text:`Uses your position: ${whereText(p.x,p.y)}${p.gps?'':' (set by hand)'}.`})],{step:[1,4],view:'r1'});
 }
 function stepSpecies(all){
-  const list=all?ANIMALS:ANIMALS.filter(a=>TOP_ANIMALS.includes(a[0]));
-  const btns=list.map(a=>el('button',{type:'button',onclick:()=>{D.type=a[0];stepCount();}},el('span',{text:a[2]}),a[1]));
+  const list=all?ANIMALS.filter(a=>a[0]!=='rhino'):TOP_ANIMALS.map(id=>ANIMALS.find(a=>a[0]===id));
+  const btns=list.map(a=>el('button',{type:'button',onclick:()=>{D.type=a[0];a[0]==='rhino'?stepRhino():stepCount();}},pic(a[0],52),a[1]));
   if(!all)btns.push(el('button',{type:'button',class:'more',onclick:()=>stepSpecies(true)},el('span',{text:'＋'}),'More animals'));
-  openSheet('Which animal?',[el('div',{class:'grid3'},...btns)],{step:[2,4],back:startReport,view:'r2'});
+  openSheet(all?'All animals':'Which animal?',[el('div',{class:'grid3'},...btns)],{step:[2,4],back:all?()=>stepSpecies():startReport,view:'r2'});
+}
+function stepRhino(){
+  openSheet('Which rhino?',[el('div',{class:'stack'},
+    ...[['rhino_b','Black rhino','Hooked lip, browses in bush'],['rhino_w','White rhino','Wide square lip, grazes in the open'],['rhino','Not sure','']].map(([id,t,sub])=>el('button',{class:'choice',type:'button',onclick:()=>{D.type=id;stepCount();}},pic(id==='rhino'?'rhino':id,54),el('span',null,t,sub?el('small',{text:sub}):null))))],{step:[2,4],back:()=>stepSpecies(),view:'rhino'});
 }
 function stepCount(){
-  openSheet(`How many ${PLURAL[D.type]&&D.type!=='rhino'?PLURAL[D.type].toLowerCase():AN[D.type][1].toLowerCase()+'s'}?`,[el('div',{class:'stack'},...COUNTS.map(c=>el('button',{class:'choice',type:'button',onclick:()=>{D.count=c;stepMove();}},el('span',{class:'n',text:c}),c==='1'?'Just one':c==='20+'?'A big herd':'A group')))],{step:[3,4],back:()=>stepSpecies(),view:'r3'});
+  openSheet(`How many ${(PLURAL[D.type]||(SHORTNAME[D.type]||SPX[D.type].name)+'s').toLowerCase()}?`,[el('div',{class:'stack'},...COUNTS.map(c=>el('button',{class:'choice',type:'button',onclick:()=>{D.count=c;stepMove();}},el('span',{class:'n',text:c}),c==='1'?'Just one':c==='20+'?'A big herd':'A group')))],{step:[3,4],back:()=>D.type.startsWith('rhino')?stepRhino():stepSpecies(),view:'r3'});
 }
 function stepMove(){
   // relative to the car when we know which way the car is pointing, otherwise compass
@@ -650,8 +705,10 @@ function sendReport(){
   const rec={id:'r'+now.toString(36)+Math.random().toString(36).slice(2,6),kind:D.kind,type:D.type,lat:+D.lat.toFixed(6),lon:+D.lon.toFixed(6),at:now,lastSeen:now,by:S.device,votes:{},note:''};
   if(D.kind==='animal'){rec.count=D.count||'1';rec.heading=D.heading??-1;}else rec.sev=D.sev||'1';
   saveReport(rec);closeSheet();
+  const fresh=D.kind==='animal'?tick(rec.type,'report'):null;
   const what=D.kind==='animal'?`${label(clean(rec.id,rec))}${rec.heading>=0?`, heading ${DIRNAME[rec.heading]}`:''}`:`${RD[rec.type][1]} (${SEV.find(s=>s[0]===rec.sev)[1]})`;
-  toast(`Sent: ${what}.`,'Add details',()=>openDetails(rec.id),6000);
+  if(fresh)setTimeout(()=>toast(`New on your list: ${SPX[rec.type].name} +${fresh} points`,'My list',()=>openFind('list'),6000),2600);
+  toast(`Sent: ${what}.`,'Add details',()=>openDetails(rec.id),2500);
 }
 function openDetails(id){
   const r=allReports().find(x=>x.id===id);if(!r)return;const patch={};
@@ -665,32 +722,86 @@ function openDetails(id){
 
 /* ---------- find animals / latest sightings ---------- */
 function relTo(x,y){const p=myPos();if(!p)return null;const d=gd(p.x,p.y,x,y);return {d,dir:DIRS[dir8(brg(p.x,p.y,x,y))]};}
-function openFind(){
+let findTab='sightings';
+function tabs(cur){const t=[['sightings','Sightings'],['guide','Guide'],['list','My list']];return el('div',{class:'seg',role:'tablist'},...t.map(([k,l])=>el('button',{type:'button',role:'tab','aria-selected':String(k===cur),class:k===cur?'on':'',onclick:()=>openFind(k),text:l})));}
+function openFind(tab){
+  if(typeof tab==='string')findTab=tab;
+  if(findTab==='guide')return openGuide();
+  if(findTab==='list')return openList();
   const all=allReports().filter(r=>r.kind==='animal'&&!(r.votes[S.device]===-1));
   const recent=all.filter(alive).sort((a,b)=>b.lastSeen-a.lastSeen);
   const row=(r)=>{const q=merc(r.lon,r.lat);const rel=relTo(q[0],q[1]);
-    return el('li',null,el('button',{type:'button',onclick:()=>openReportView(r)},el('span',{class:'em',text:emoji(r)}),
+    return el('li',null,el('button',{type:'button',onclick:()=>openReportView(r)},pic(r.type,46),
       el('span',null,el('b',{text:label(r)}),el('small',{text:`${r.example?'Example · ':''}Seen ${hhmm(r.lastSeen)} ${dayWord(r.lastSeen)} · ${ago(r.lastSeen)}`}),el('small',{text:whereText(q[0],q[1])})),
       el('span',{class:'r'},rel?fmtD(rel.d):'',rel?el('small',{text:rel.dir}):'')));};
   const winSel=el('select',{class:'opt',id:'winSel','aria-label':'How far back to show'},...[[2,'Last 2 h'],[6,'Last 6 h'],[12,'Last 12 h'],[48,'Last 2 days']].map(([v,t])=>{const o=el('option',{value:String(v),text:t});if((S.animalWin||6)===v)o.selected=true;return o;}));
   winSel.onchange=()=>{S.animalWin=+winSel.value;LS.set('win',S.animalWin);openFind();redraw();};
-  const nodes=[el('div',{class:'acts'},winSel),el('p',{class:'lbl',text:'Latest sightings'}),
+  const nodes=[tabs('sightings'),el('div',{class:'acts'},winSel),el('p',{class:'lbl',text:'Latest sightings'}),
     recent.length?el('ul',{class:'list'},...recent.slice(0,15).map(row)):el('p',{class:'hint',text:'No sightings in this time window. Report what you see to help others.'})];
-  // last seen per species (up to 7 days)
   const last={};for(const r of all){if(Date.now()-r.lastSeen>7*864e5)continue;if(!last[r.type]||r.lastSeen>last[r.type].lastSeen)last[r.type]=r;}
-  nodes.push(el('p',{class:'lbl',text:'Last seen, by animal'}));
-  nodes.push(el('ul',{class:'list'},...ANIMALS.filter(a=>a[0]!=='other'&&a[0]!=='bird').map(a=>{const r=last[a[0]];
-    if(!r)return el('li',{class:'none'},el('button',{type:'button',disabled:true},el('span',{class:'em',text:a[2]}),el('span',null,el('b',{text:a[1]}),el('small',{text:'No reports in the last 7 days'})),el('span')));
+  nodes.push(el('p',{class:'lbl',text:'Last seen, by animal (7 days)'}));
+  nodes.push(el('ul',{class:'list'},...window.SPECIES.map(x=>{const r=last[x.id];
+    if(!r)return el('li',{class:'none'},el('button',{type:'button',onclick:()=>openSpecies(x.id)},pic(x.id,46),el('span',null,el('b',{text:x.name}),el('small',{text:'No reports in the last 7 days'})),el('span')));
     const q=merc(r.lon,r.lat);const rel=relTo(q[0],q[1]);
-    return el('li',null,el('button',{type:'button',onclick:()=>openReportView(r)},el('span',{class:'em',text:a[2]}),el('span',null,el('b',{text:a[1]}),el('small',{text:`Last seen ${hhmm(r.lastSeen)} ${dayWord(r.lastSeen)} (${ago(r.lastSeen)})`})),el('span',{class:'r'},rel?fmtD(rel.d):'',rel?el('small',{text:rel.dir}):'')));})));
+    return el('li',null,el('button',{type:'button',onclick:()=>openReportView(r)},pic(x.id,46),el('span',null,el('b',{text:x.name}),el('small',{text:`Last seen ${hhmm(r.lastSeen)} ${dayWord(r.lastSeen)} (${ago(r.lastSeen)})`})),el('span',{class:'r'},rel?fmtD(rel.d):'',rel?el('small',{text:rel.dir}):'')));})));
   openSheet('Animals',nodes,{view:'find'});
+}
+function dangerChip(d){return el('span',{class:'tag',style:`background:${DANGER[d][1]}1F;color:${DANGER[d][1]}`,text:DANGER[d][0]});}
+function rarityDots(r){return el('span',{class:'rar','aria-label':RARITY[r]},'●'.repeat(r)+'○'.repeat(4-r));}
+function openGuide(){
+  const groups=[...new Set(window.SPECIES.map(x=>x.group))];
+  const rules=el('details',{class:'rules'},el('summary',{text:'Driving among animals: 10 rules'}),el('ol',null,...window.PARK_RULES.map(t=>el('li',{text:t}))));
+  const nodes=[tabs('guide'),rules];
+  for(const g of groups){nodes.push(el('p',{class:'lbl',text:g}));
+    nodes.push(el('ul',{class:'list'},...window.SPECIES.filter(x=>x.group===g).map(x=>el('li',null,el('button',{type:'button',onclick:()=>openSpecies(x.id)},pic(x.id,50),
+      el('span',null,el('b',{text:x.name}),el('small',null,dangerChip(x.danger),' ',rarityDots(x.rarity),' ',RARITY[x.rarity])),
+      el('span',{class:'r'},has(x.id)?'✓':'')))))); }
+  nodes.push(el('p',{class:'fine',text:'Photos: Wikipedia and Wikimedia Commons contributors (tap a photo for its source). Guidance is general advice; always follow ranger instructions.'}));
+  openSheet('Animals',nodes,{view:'guide'});
+}
+function openSpecies(id){
+  const x=SPX[id];if(!x)return;
+  const u=PH.url[id];const nodes=[];
+  nodes.push(u?el('a',{class:'hero',href:PH.page[id]||'#',target:'_blank',rel:'noopener','aria-label':'Photo source'},el('img',{src:u,alt:x.name})):el('div',{class:'hero emoji',text:x.emoji}));
+  nodes.push(el('div',null,el('div',{class:'when',text:x.name}),el('p',{class:'hint'},el('i',{text:x.latin}),x.kin?` · Kinyarwanda: ${x.kin}`:'')));
+  nodes.push(el('div',{class:'meta'},dangerChip(x.danger),el('span',{class:'tag',text:`${RARITY[x.rarity]} · ${POINTS[x.rarity]} points`}),el('span',{class:'tag',text:x.size}),has(id)?el('span',{class:'tag',style:'background:#DCF0E2;color:#1E5E35',text:S.life[id].how==='report'?'✓ Reported':'✓ Seen'}):null));
+  // latest report of this species
+  const rs=allReports().filter(r=>r.kind==='animal'&&(r.type===id||(id.startsWith('rhino')&&r.type==='rhino'))&&alive(r)).sort((a,b)=>b.lastSeen-a.lastSeen);
+  if(rs.length){const r=rs[0];const q=merc(r.lon,r.lat);const rel=relTo(q[0],q[1]);nodes.push(el('button',{class:'lastseen',type:'button',onclick:()=>openReportView(r)},el('b',{text:`Last reported ${hhmm(r.lastSeen)} ${dayWord(r.lastSeen)} (${ago(r.lastSeen)})${r.example?' · example':''}`}),el('span',{text:whereText(q[0],q[1])+(rel?` · ${fmtD(rel.d)} ${rel.dir} of you`:'')})));}
+  nodes.push(el('p',{class:'lbl',text:'In Akagera'}),el('p',{class:'body',text:x.where}),el('p',{class:'body',text:x.about}));
+  if(x.signs.length||x.doList.length||x.never.length){
+    nodes.push(el('p',{class:'lbl',text:'Next to your car'}));
+    if(x.signs.length)nodes.push(el('div',{class:'safety warn'},el('b',{text:'Warning signs'}),el('ul',null,...x.signs.map(t=>el('li',{text:t})))));
+    if(x.doList.length)nodes.push(el('div',{class:'safety do'},el('b',{text:'Do'}),el('ul',null,...x.doList.map(t=>el('li',{text:t})))));
+    if(x.never.length)nodes.push(el('div',{class:'safety dont'},el('b',{text:'Never'}),el('ul',null,...x.never.map(t=>el('li',{text:t})))));
+  }
+  nodes.push(el('div',{class:'acts'},el('button',{class:'primary',type:'button',onclick:()=>startReport(id),text:'Report it'}),
+    has(id)?el('button',{class:'secondary',type:'button',onclick:()=>{untick(id);openSpecies(id);},text:'Untick'}):el('button',{class:'secondary ok',type:'button',onclick:()=>{const p=tick(id,'seen');toast(p?`${x.name} ticked +${p} points`:'Ticked.');openSpecies(id);},text:'Tick as seen'})));
+  openSheet(x.name,nodes,{view:'species:'+id,back:()=>openFind(findTab)});
+}
+function openList(){
+  const sc=score();const nodes=[tabs('list')];
+  const pct=sc.next?Math.round((sc.pts-sc.lv[0])/(sc.next[0]-sc.lv[0])*100):100;
+  nodes.push(el('div',{class:'scorecard'},el('div',{class:'lvl'},el('span',{text:sc.lv[1]}),el('b',{text:`${sc.pts} points`})),
+    el('div',{class:'bar'},el('i',{style:`width:${pct}%`})),
+    el('p',{class:'fine',text:`${sc.n} of ${sc.total} animals ticked${sc.next?` · ${sc.next[0]-sc.pts} points to ${sc.next[1]}`:' · top level reached'}`})));
+  nodes.push(el('p',{class:'lbl',text:'Badges'}),el('div',{class:'badges'},...window.BADGES.map(b=>{const got=sc.badges.includes(b);const prog=b.need.filter(g=>g.some(has)).length;
+    return el('div',{class:'badge'+(got?' got':''),title:b.text},el('span',{class:'bi',text:b.icon}),el('b',{text:b.name}),el('small',{text:got?`+${b.bonus} points`:`${prog}/${b.need.length} · ${b.text}`}));})));
+  const groups=[...new Set(window.SPECIES.map(x=>x.group))];
+  for(const g of groups){const xs=window.SPECIES.filter(x=>x.group===g);nodes.push(el('p',{class:'lbl',text:`${g} · ${xs.filter(x=>has(x.id)).length}/${xs.length}`}));
+    nodes.push(el('ul',{class:'list check'},...xs.map(x=>{const t=S.life[x.id];return el('li',{class:t?'done':''},el('button',{type:'button',onclick:()=>openSpecies(x.id)},pic(x.id,46,t?'':'dim'),
+      el('span',null,el('b',{text:x.name}),el('small',{text:t?`${t.how==='report'?'Reported':'Seen'} ${hhmm(t.t)} ${dayWord(t.t)}`:`${RARITY[x.rarity]} · ${POINTS[x.rarity]} points`})),
+      el('span',{class:'tickbox','aria-label':t?'Ticked':'Not ticked',text:t?'✓':''})));})));}
+  nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>{openSheet('Start a new trip?',[el('p',{class:'hint',text:'This clears all ticks and badges on this phone so you can start a fresh list.'}),el('button',{class:'primary',type:'button',onclick:()=>{S.life={};LS.set('life',S.life);openFind('list');toast('New trip started.');},text:'Clear my list'}),el('button',{class:'secondary',type:'button',onclick:()=>openFind('list'),text:'Keep my list'})],{view:'reset'});},text:'Start a new trip'}));
+  nodes.push(el('p',{class:'fine',text:'Animals you report are ticked automatically. You can also tick an animal you saw without reporting it. Your list stays on this phone.'}));
+  openSheet('Animals',nodes,{view:'list'});
 }
 
 /* ---------- one report ---------- */
 function openReportView(r,silent){
   selected=r;const q=merc(r.lon,r.lat);if(!silent&&!S.nav){S.follow=false;centerOn(q[0],q[1]+H*0.2/cam.s);}
   const t=tally(r);const nodes=[];
-  nodes.push(el('div',{class:'det-head'},el('span',{class:'em',text:emoji(r)}),el('div',null,el('b',{text:label(r)}),el('div',{class:'when',text:`${r.kind==='animal'?'Seen':'Reported'} ${hhmm(r.at)} ${dayWord(r.at)}`}),el('p',{class:'hint',text:ago(r.at)+(r.lastSeen-r.at>60e3?` · confirmed ${hhmm(r.lastSeen)} (${ago(r.lastSeen)})`:'')}))));
+  nodes.push(el('div',{class:'det-head'},r.kind==='animal'?pic(r.type,64):el('span',{class:'em',text:emoji(r)}),el('div',null,el('b',{text:label(r)}),el('div',{class:'when',text:`${r.kind==='animal'?'Seen':'Reported'} ${hhmm(r.at)} ${dayWord(r.at)}`}),el('p',{class:'hint',text:ago(r.at)+(r.lastSeen-r.at>60e3?` · confirmed ${hhmm(r.lastSeen)} (${ago(r.lastSeen)})`:'')}))));
   const tags=[];if(r.example)tags.push(el('span',{class:'tag ex',text:'Example, not a real report'}));if(r.pending)tags.push(el('span',{class:'tag',text:'Waiting for signal to send'}));
   if(t.there)tags.push(el('span',{class:'tag',text:`${t.there} confirmed`}));if(t.gone)tags.push(el('span',{class:'tag',text:`${t.gone} say gone`}));
   if(r.kind==='road')tags.push(el('span',{class:'tag',text:SEV.find(s=>s[0]===(r.sev||'1'))[1]}));
@@ -703,6 +814,7 @@ function openReportView(r,silent){
   nodes.push(el('div',{class:'dir'},...lines));
   if(r.note)nodes.push(el('p',{class:'note',text:r.note}));
   nodes.push(el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:q[0],y:q[1],name:label(r)}),text:'Navigate here'}));
+  if(r.kind==='animal'&&SPX[r.type]&&SPX[r.type].where)nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>openSpecies(r.type),text:`${SPX[r.type].name}: safety and facts`}));
   if(!r.example){const mine=r.by===S.device;nodes.push(el('div',{class:'acts'},el('button',{class:'secondary ok',type:'button',onclick:()=>{patchReport(r,{votes:{[S.device]:1},lastSeen:Date.now()});toast('Thanks. Marked as still there.');},text:'Still there'}),el('button',{class:'secondary no',type:'button',onclick:()=>{patchReport(r,{votes:{[S.device]:-1}});closeSheet();toast(mine?'Removed.':'Thanks. Marked as gone.');},text:mine?'Remove my report':'Not there any more'})));}
   openSheet(r.kind==='animal'?'Sighting':'Road report',nodes,{view:'rep:'+r.id});redraw();
 }
@@ -712,7 +824,7 @@ function openPoi(p){
   const nodes=[el('p',{class:'hint',text:kind+(p.note?'. '+p.note:'')+(p.cat==='junction'?' Position read off the park board (about 1 km accuracy).':'')})];
   if(rel)nodes.push(el('div',{class:'dir'},el('p',null,el('b',{text:'From you: '}),`${fmtD(rel.d)} ${DIRNAME[DIRS.indexOf(rel.dir)]} (straight line).`)));
   nodes.push(el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:p.x,y:p.y,name:p.cat==='junction'?'Junction '+p.num:(p.short||p.name)}),text:'Navigate here'}));
-  if(!S.gps.ok)nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>{S.manual={lat:p.lat,lon:p.lon,at:Date.now()};LS.set('manual',S.manual);closeSheet();updateGpsLine();toast('Position set here.');},text:'I am here'}));
+  nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();setManual(p.lat,p.lon,'Position set here.');},text:'I am here'}));
   openSheet(p.cat==='junction'?'Junction '+p.num:(p.short||p.name),nodes,{view:'poi'});
 }
 
@@ -751,6 +863,7 @@ function previewRoute(dest){
   for(const s of r.sights.slice(0,3))nodes.push(el('div',{class:'warnrow',style:'background:#E4F2E8;color:#1E4D2E',text:`${emoji(s)} ${label(s)} near this route, seen ${hhmm(s.lastSeen)} (${ago(s.lastSeen)})${s.example?' (example)':''}.`}));
   if(wetness()>=5)nodes.push(el('div',{class:'warnrow',style:'background:#DCEAF8;color:#1D4F86',text:`${wetness().toFixed(0)} mm of rain in the last 24 h. Tracks may be muddy, so the route prefers the main roads.`}));
   nodes.push(el('button',{class:'primary green',type:'button',onclick:startNav,text:'Start'}));
+  if(!myPos().gps)nodes.push(el('p',{class:'fine',text:'Your position is set by hand, so the route starts there. To be guided as you drive, choose "Use my GPS again" in the position menu, or try Demo drive in Settings.'}));
   if(!S.layers.osm)nodes.push(el('p',{class:'fine',text:'Roads come from the park board until the detailed OpenStreetMap roads finish loading, so directions are approximate.'}));
   openSheet(`To ${dest.name}`,nodes,{view:'preview'});
 }
@@ -859,7 +972,7 @@ function openSettings(){
   openSheet('Settings',nodes,{view:'settings'});
 }
 $('setBtn').onclick=openSettings;$('syncPill').onclick=openSettings;
-$('reportBtn').onclick=startReport;$('findBtn').onclick=openFind;$('goBtn').onclick=openGo;
+$('reportBtn').onclick=()=>startReport();$('findBtn').onclick=()=>openFind();$('goBtn').onclick=openGo;
 
 /* =========================================================================
    13. Boot
@@ -872,7 +985,8 @@ async function boot(){
   new ResizeObserver(()=>resize()).observe(cv);resize();fitPark();
   if(document.fonts&&document.fonts.ready)document.fonts.ready.then(redraw);
   updateWxPill();setSync();updateGpsLine();
-  startGPS();loadWeather();initSharing();
+  startGPS();loadWeather();initSharing();loadPhotos();
+  window.addEventListener('online',loadPhotos);
   setInterval(()=>{loadWeather();redraw();updateGpsLine();},60e3);
   window.addEventListener('online',()=>loadWeather(true));
   // follow GPS in browse mode

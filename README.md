@@ -10,6 +10,8 @@ Open it on a phone at **https://ebazine.github.io/akagera-live/** and use *Add t
 - **Timestamps everywhere.** Every sighting shows the clock time it was seen and how long ago. *Animals* lists the latest sightings and the last time each species was seen (up to 7 days).
 - **Road reports expire with the weather.** Mud, flooding and slippery climbs last a base time plus extra hours per millimetre of rain (Open-Meteo data for the north, centre and south of the park), and longer if it rains again. Other problems have fixed lifetimes (fallen tree 3 days, closure 7 days, potholes 14 days, stuck vehicle 6 h, animals on the road 1 h). Anyone can mark a report *still there* or *gone*.
 - **Routes avoid trouble.** Impassable reports block the road for routing, 4x4-only and caution reports weigh it down, and after heavy rain the router prefers main roads over tracks.
+- **Animal guide.** 34 animals of Akagera with photos, where to find them, and what to do next to your car: warning signs, do's and never's, plus 10 rules for driving among animals.
+- **Score sheet.** Every animal you report is ticked off. Points by rarity, badges (Big Five, Rhino double, Lake life, Antelope ace and more) and levels from Rookie to Akagera Legend.
 - **Works offline.** The app, map data and your reports are cached on the phone. Reports queue and send when you are back in coverage.
 
 ## Data
@@ -17,6 +19,7 @@ Open it on a phone at **https://ebazine.github.io/akagera-live/** and use *Add t
 - Roads, lakes and wetlands: © OpenStreetMap contributors (ODbL), refreshed every Monday by `.github/workflows/osm.yml` into `data/osm.json`. Run the workflow by hand from the *Actions* tab to refresh now.
 - Junction stones, ranger posts and fence houses: traced from the park entrance board (`data/board.json`), accurate to about 1 km.
 - Weather: [Open-Meteo](https://open-meteo.com/). Satellite background: Esri World Imagery.
+- Animal photos: loaded from each species' Wikipedia article (Wikimedia Commons contributors, licences on the linked pages) and cached for offline use. Animal texts are general guidance; always follow ranger instructions.
 
 ## Turn on shared reports (Firebase, about 10 minutes)
 
@@ -58,6 +61,7 @@ The Firebase web config is not a secret; the rules above decide what visitors ca
 | `index.html`, `app.css`, `app.js` | The app |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and home-screen install |
 | `config.js` | Firebase settings for shared reports |
+| `species.js` | Animal guide, safety advice, badges and levels |
 | `data/board.json` | Map traced from the park entrance board |
 | `data/osm.json` | OpenStreetMap roads and lakes (built by GitHub Actions) |
 | `tools/build_osm.py` | Builds `data/osm.json` |
