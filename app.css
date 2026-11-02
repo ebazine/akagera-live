@@ -353,3 +353,13 @@ a.secondary{display:flex;align-items:center;justify-content:center;text-decorati
 .sw{width:42px;height:42px;border-radius:50%;border:2px solid rgba(0,0,0,.18);box-shadow:inset 0 0 0 3px #fff}
 .sw.on{outline:3px solid var(--bush);outline-offset:2px}
 .avgrid{max-height:260px;overflow-y:auto}
+/* official park map viewer */
+.pmview{position:fixed;inset:0;background:#1A1D1A;z-index:60;display:block}
+.pmview[hidden]{display:none}
+.pmstage{position:absolute;inset:0;overflow:hidden;touch-action:none;cursor:grab}
+.pmstage img{position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-drag:none;max-width:none}
+.pmbar{position:absolute;left:10px;right:10px;top:calc(10px + env(safe-area-inset-top));display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.96);border-radius:16px;padding:8px 8px 8px 14px;box-shadow:0 4px 14px rgba(0,0,0,.3)}
+.pmbar b{flex:1;font-size:16px}
+.pmbtn{border:0;background:var(--soft);color:var(--ink);font-weight:700;font-size:15px;border-radius:12px;padding:10px 12px;text-decoration:none}
+.pmx{border:0;width:44px;height:44px;border-radius:12px;background:var(--ink);color:#fff;font-size:26px}
+.pmhint{position:absolute;bottom:calc(14px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;color:rgba(255,255,255,.75);font-size:14px;pointer-events:none}

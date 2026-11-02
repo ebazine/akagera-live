@@ -1,7 +1,7 @@
 /* Offline support: the app, map data and fonts are cached so the map, your GPS position,
    routing and saved reports keep working without signal in the park. */
-const VERSION = 'akl-v2.8.0';
-const CORE = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'species.js', 'emergency.js', 'manifest.webmanifest', 'data/board.json', 'data/osm.json', 'icons/icon-192.png', 'icons/icon-512.png'];
+const VERSION = 'akl-v2.9.0';
+const CORE = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'species.js', 'emergency.js', 'manifest.webmanifest', 'data/board.json', 'data/osm.json', 'data/official.json', 'icons/icon-192.png', 'icons/icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => Promise.all(CORE.map(u => c.add(u).catch(() => null)))).then(() => self.skipWaiting()));
 });
@@ -24,6 +24,13 @@ self.addEventListener('fetch', e => {
       const hit = await c.match(e.request);
       const net = fetch(e.request).then(r => { if (r.ok || r.type === 'opaque') c.put(e.request, r.clone()); return r; }).catch(() => hit);
       return hit || net;
+    }));
+    return;
+  }
+  if (url.pathname.includes('/data/official/')) {                    // official park map tiles and viewer: cache first
+    e.respondWith(caches.open('akl-tiles').then(async c => {
+      const hit = await c.match(e.request); if (hit) return hit;
+      try { const r = await fetch(e.request); if (r.ok) c.put(e.request, r.clone()); return r; } catch (err) { return new Response('', {status: 504}); }
     }));
     return;
   }
