@@ -13,6 +13,7 @@ Open it on a phone at **https://ebazine.github.io/akagera-live/** and use *Add t
 - **Timestamps everywhere.** Every sighting shows the clock time it was seen and how long ago. *Animals* lists the latest sightings and the last time each species was seen (up to 7 days).
 - **Road reports expire with the weather.** Mud, flooding and slippery climbs last a base time plus extra hours per millimetre of rain (Open-Meteo data for the north, centre and south of the park), and longer if it rains again. Other problems have fixed lifetimes (fallen tree 3 days, closure 7 days, potholes 14 days, stuck vehicle 6 h, animals on the road 1 h). Anyone can mark a report *still there* or *gone*.
 - **Verify sightings on the spot.** Within 400 m of another driver's sighting, with a live GPS fix (accurate to 100 m or better), you can tap *I see it*. The sighting gets a green tick, its time is refreshed, the verifier's name and vehicle (from the trip pass) and distance are shown, the animal is ticked on your list and you earn 5 points. *Not there any more* also needs you to be near (the reporter can always remove their own). The app alerts you, by voice and vibration, when you come within 400 m of a sighting, with *I see it* / *Not here* buttons. This works while the app is open on screen (a web app cannot alert in the background). Turn it off in Settings.
+- **Leaderboard.** Under Animals → 🏆 Board. Join with a nickname and an animal avatar; choose whether to appear on the park-wide board. Points: ticked animals (5–40 by rarity), badges, +5 per sighting you verify on the spot, +3 when another driver verifies yours. Views for *Today*, *This week* and *Overall* (Rwanda time), a podium, rank changes since your last visit, 👑 for the week's leader, 🔥 for days in a row, "points to pass" the next driver and a toast when you move up. Private groups (family, office) with a 6-character code and an invite link (`?join=CODE`), and a shareable score-card picture. Only the nickname, avatar, level and points are shared; entries untouched for 90 days are removed.
 - **Map layers.** The layers button on the right shows or hides sightings, road reports, junction stones, lodges and camps, gates and ranger posts, names, closed tracks, rivers and wetlands, and example reports, with *Clean*, *Animals only* and *Everything* presets.
 - **Routes avoid trouble.** Impassable reports block the road for routing, 4x4-only and caution reports weigh it down, and after heavy rain the router prefers main roads over tracks.
 - **Animal guide.** 34 animals of Akagera with photos, where to find them, and what to do next to your car: warning signs, do's and never's, plus 10 rules for driving among animals.
@@ -68,6 +69,31 @@ service cloud.firestore {
 
     // visible pass: other drivers can see it only while it is active (the app hides it outside the dates);
     // any signed-in phone may delete a pass once it has ended
+    // leaderboard: one entry per phone with a nickname, an animal and points only
+    match /board/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name','emoji','pub','groups','pts','pDay','day','pWk','wk','stk','n','ver','sc','badges','lv','rare','updatedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 24
+        && request.resource.data.pub is bool
+        && request.resource.data.groups is list && request.resource.data.groups.size() <= 5
+        && request.resource.data.badges is list && request.resource.data.badges.size() <= 12
+        && request.resource.data.pts is int && request.resource.data.pts >= 0 && request.resource.data.pts <= 5000
+        && request.resource.data.pDay is int && request.resource.data.pDay >= 0 && request.resource.data.pDay <= request.resource.data.pts
+        && request.resource.data.pWk is int && request.resource.data.pWk >= 0 && request.resource.data.pWk <= request.resource.data.pts
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && (request.auth.uid == uid || resource.data.updatedAt < request.time - duration.value(90, 'd'));
+    }
+    // private leaderboard groups, joined with a 6-character code
+    match /lbgroups/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn() && code.matches('^[A-Z2-9]{6}$')
+        && request.resource.data.keys().hasOnly(['name','by','createdAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 40
+        && request.resource.data.by == request.auth.uid && request.resource.data.createdAt == request.time;
+      allow delete: if signedIn() && resource.data.by == request.auth.uid;
+    }
+
     match /profiles/{uid} {
       allow read: if signedIn();
       allow create, update: if signedIn() && request.auth.uid == uid

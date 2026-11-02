@@ -27,6 +27,31 @@ service cloud.firestore {
 
     // visible pass: other drivers can see it only while it is active (the app hides it outside the dates);
     // any signed-in phone may delete a pass once it has ended
+    // leaderboard: one entry per phone with a nickname, an animal and points only
+    match /board/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name','emoji','pub','groups','pts','pDay','day','pWk','wk','stk','n','ver','sc','badges','lv','rare','updatedAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 24
+        && request.resource.data.pub is bool
+        && request.resource.data.groups is list && request.resource.data.groups.size() <= 5
+        && request.resource.data.badges is list && request.resource.data.badges.size() <= 12
+        && request.resource.data.pts is int && request.resource.data.pts >= 0 && request.resource.data.pts <= 5000
+        && request.resource.data.pDay is int && request.resource.data.pDay >= 0 && request.resource.data.pDay <= request.resource.data.pts
+        && request.resource.data.pWk is int && request.resource.data.pWk >= 0 && request.resource.data.pWk <= request.resource.data.pts
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if signedIn() && (request.auth.uid == uid || resource.data.updatedAt < request.time - duration.value(90, 'd'));
+    }
+    // private leaderboard groups, joined with a 6-character code
+    match /lbgroups/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn() && code.matches('^[A-Z2-9]{6}$')
+        && request.resource.data.keys().hasOnly(['name','by','createdAt'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 40
+        && request.resource.data.by == request.auth.uid && request.resource.data.createdAt == request.time;
+      allow delete: if signedIn() && resource.data.by == request.auth.uid;
+    }
+
     match /profiles/{uid} {
       allow read: if signedIn();
       allow create, update: if signedIn() && request.auth.uid == uid

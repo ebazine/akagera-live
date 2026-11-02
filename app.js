@@ -439,7 +439,7 @@ async function initSharing(){
     const q=F.query(F.collection(db,'reports'),F.where('at','>',Date.now()-14*864e5),F.orderBy('at','desc'),F.limit(600));
     F.onSnapshot(q,{includeMetadataChanges:true},snap=>{
       S.live=snap.docs.map(d=>{const o=clean(d.id,d.data());if(o)o.pending=d.metadata.hasPendingWrites;return o;}).filter(Boolean);
-      S.sync=snap.metadata.fromCache?'offline':'live';if(S.live.length)hideBanner();setSync();redraw();refreshSheet();checkSOS();checkNear(true);
+      S.sync=snap.metadata.fromCache?'offline':'live';if(S.live.length)hideBanner();setSync();redraw();refreshSheet();checkSOS();checkNear(true);checkScouted();
     },err=>{S.sync='error';setSync();});
   }catch(e){S.sync='local';setSync();}
 }
@@ -518,17 +518,17 @@ S.life=LS.get('life',{});
 const LISTED=window.SPECIES;
 function tick(id,how){const sp=SPX[id];if(!sp)return null;const had=S.life[id];
   if(had&&(had.how==='report'||how!=='report'))return null;
-  S.life[id]={t:had?had.t:Date.now(),how};LS.set('life',S.life);updateCount();
+  S.life[id]={t:had?had.t:Date.now(),how};LS.set('life',S.life);updateCount();setTimeout(()=>lbPublish(),50);
   const before=earnedBadges().map(b=>b.id);setTimeout(()=>{const nb=earnedBadges().filter(b=>!before.includes(b.id));for(const b of nb)setTimeout(()=>toast(`Badge earned: ${b.icon} ${b.name} +${b.bonus} points`),5200);},10);
   return had?null:(POINTS[sp.rarity]||0);}
-function untick(id){delete S.life[id];LS.set('life',S.life);updateCount();}
+function untick(id){delete S.life[id];LS.set('life',S.life);updateCount();setTimeout(()=>lbPublish(),50);}
 function updateCount(){const c=$('lifeCount');if(c)c.textContent=`${LISTED.filter(x=>has(x.id)).length}/${LISTED.length}`;}
 const has=id=>!!S.life[id];
 function earnedBadges(){return window.BADGES.filter(b=>b.need.every(group=>group.some(has)));}
 function score(){let pts=0,n=0;for(const x of LISTED){if(has(x.id)){pts+=POINTS[x.rarity]||0;n++;}}const badges=earnedBadges();for(const b of badges)pts+=b.bonus;
-  const nver=Object.keys(S.myVer||{}).length;pts+=5*nver;
+  const nver=Object.keys(S.myVer||{}).length,nsc=Object.keys(S.myScouted||{}).length;pts+=5*nver+3*nsc;
   let lv=window.LEVELS[0],next=null;for(let i=0;i<window.LEVELS.length;i++){if(pts>=window.LEVELS[i][0]){lv=window.LEVELS[i];next=window.LEVELS[i+1]||null;}}
-  return {pts,n,total:LISTED.length,badges,lv,next,nver};}
+  return {pts,n,total:LISTED.length,badges,lv,next,nver,nsc};}
 
 /* =========================================================================
    7. Position: GPS, manual fallback, demo drive
@@ -763,7 +763,7 @@ function openSheet(title,nodes,o={}){const nc=$('nearCard');if(nc)nc.hidden=true
   const dots=$('sheetDots');dots.replaceChildren();if(o.step){for(let i=1;i<=o.step[1];i++)dots.append(el('i',{class:i<=o.step[0]?'on':''}));}$('sheetBody').scrollTop=0;}
 function closeSheet(){$('sheet').hidden=true;sheetView=null;selected=null;redraw();setTimeout(()=>checkNear(true),50);}
 $('sheetClose').onclick=closeSheet;$('sheetBack').onclick=()=>backFn&&backFn();
-function refreshSheet(){if($('sheet').hidden)return;if(sheetView==='findanimals')return;if(sheetView==='find')openFind('sightings');else if(sheetView==='guide')openFind('guide');else if(sheetView==='list')openFind('list');else if(sheetView&&sheetView.startsWith('species:'))openSpecies(sheetView.slice(8));else if(sheetView&&sheetView.startsWith('rep:')){const r=allReports().find(x=>x.id===sheetView.slice(4));if(r)openReportView(r,true);}}
+function refreshSheet(){if($('sheet').hidden)return;if(sheetView==='findanimals')return;if(sheetView==='board')return openBoard(true);if(sheetView==='find')openFind('sightings');else if(sheetView==='guide')openFind('guide');else if(sheetView==='list')openFind('list');else if(sheetView&&sheetView.startsWith('species:'))openSpecies(sheetView.slice(8));else if(sheetView&&sheetView.startsWith('rep:')){const r=allReports().find(x=>x.id===sheetView.slice(4));if(r)openReportView(r,true);}}
 let toastT=null;
 function toast(t,btn,fn,ms=3600){const e=$('toast');e.replaceChildren(...[el('span',{text:t}),btn?el('button',{type:'button',onclick:()=>{e.hidden=true;fn();},text:btn}):null].filter(Boolean));e.hidden=false;const up=!$('sheet').hidden;e.style.top=up?'calc(12px + env(safe-area-inset-top))':'';e.style.bottom=up?'auto':S.preview?'calc(150px + env(safe-area-inset-bottom))':S.nav?'calc(100px + env(safe-area-inset-bottom))':'';clearTimeout(toastT);toastT=setTimeout(()=>e.hidden=true,ms);}
 function banner(text,btn,fn,cls){const b=$('banner');b.className='banner'+(cls?' '+cls:'');b.replaceChildren(...[el('p',{text}),btn?el('button',{type:'button',onclick:fn,text:btn}):null].filter(Boolean));b.hidden=false;}
@@ -854,11 +854,12 @@ function openDetails(id){
 /* ---------- find animals / latest sightings ---------- */
 function relTo(x,y){const p=myPos();if(!p)return null;const d=gd(p.x,p.y,x,y);return {d,dir:DIRS[dir8(brg(p.x,p.y,x,y))]};}
 let findTab='sightings';
-function tabs(cur){const t=[['sightings','Sightings'],['guide','Guide'],['list','My list']];return el('div',{class:'seg',role:'tablist'},...t.map(([k,l])=>el('button',{type:'button',role:'tab','aria-selected':String(k===cur),class:k===cur?'on':'',onclick:()=>openFind(k),text:l})));}
+function tabs(cur){const t=[['sightings','Sightings'],['guide','Guide'],['list','My list'],['board','🏆 Board']];return el('div',{class:'seg seg4',role:'tablist'},...t.map(([k,l])=>el('button',{type:'button',role:'tab','aria-selected':String(k===cur),class:k===cur?'on':'',onclick:()=>openFind(k),text:l})));}
 function openFind(tab){
   if(typeof tab==='string')findTab=tab;
   if(findTab==='guide')return openGuide();
   if(findTab==='list')return openList();
+  if(findTab==='board')return openBoard();
   const all=allReports().filter(r=>r.kind==='animal'&&!(r.votes[S.device]===-1));
   const recent=all.filter(alive).sort((a,b)=>b.lastSeen-a.lastSeen);
   const row=(r)=>{const q=merc(r.lon,r.lat);const rel=relTo(q[0],q[1]);
@@ -953,7 +954,8 @@ function openList(){
   const pct=sc.next?Math.round((sc.pts-sc.lv[0])/(sc.next[0]-sc.lv[0])*100):100;
   nodes.push(el('div',{class:'scorecard'},el('div',{class:'lvl'},el('span',{text:sc.lv[1]}),el('b',{text:`${sc.pts} points`})),
     el('div',{class:'bar'},el('i',{style:`width:${pct}%`})),
-    el('p',{class:'fine',text:`${sc.n} of ${sc.total} animals ticked${sc.nver?` · ${sc.nver} sighting${sc.nver>1?'s':''} verified (+${5*sc.nver})`:''}${sc.next?` · ${sc.next[0]-sc.pts} points to ${sc.next[1]}`:' · top level reached'}`})));
+    el('p',{class:'fine',text:`${sc.n} of ${sc.total} animals ticked${sc.nver?` · ${sc.nver} sighting${sc.nver>1?'s':''} verified (+${5*sc.nver})`:''}${sc.nsc?` · ${sc.nsc} of yours verified by others (+${3*sc.nsc})`:''}${sc.next?` · ${sc.next[0]-sc.pts} points to ${sc.next[1]}`:' · top level reached'}`})),
+    el('button',{class:'secondary',type:'button',onclick:()=>openFind('board'),text:LB.joined?'🏆 See the leaderboard':'🏆 Join the leaderboard'}));
   nodes.push(el('p',{class:'lbl',text:'Badges'}),el('div',{class:'badges'},...window.BADGES.map(b=>{const got=sc.badges.includes(b);const prog=b.need.filter(g=>g.some(has)).length;
     return el('div',{class:'badge'+(got?' got':''),title:b.text},el('span',{class:'bi',text:b.icon}),el('b',{text:b.name}),el('small',{text:got?`+${b.bonus} points`:`${prog}/${b.need.length} · ${b.text}`}));})));
   const groups=[...new Set(window.SPECIES.map(x=>x.group))];
@@ -1302,6 +1304,7 @@ async function endTrip(){
   await tr(async()=>{const mine=await F.getDocs(F.query(F.collection(db,'chat'),F.where('uid','==',uid)));for(const d of mine.docs)await F.deleteDoc(d.ref);});
   for(const t of SOC.dms)await tr(async()=>{const ms=await F.getDocs(F.query(F.collection(db,'dms',t.id,'msgs'),F.where('uid','==',uid)));for(const d of ms.docs)await F.deleteDoc(d.ref);});
   await tr(()=>F.deleteDoc(F.doc(db,'trips',uid)));await tr(()=>F.deleteDoc(F.doc(db,'profiles',uid)));
+  if(LB.joined){await tr(()=>F.deleteDoc(F.doc(db,'board',uid)));if(LB.parkUnsub){LB.parkUnsub();LB.parkUnsub=null;}if(LB.unsub){LB.unsub();LB.unsub=null;}LB.lastPub='';}
   endSocial();SOC.profile=null;LS.set('pass',null);LS.set('trip',null);try{await S.fs.AU.signOut(S.fs.auth);}catch(e){}S.fs.uid=null;closeSheet();updateMeBtn();toast('Trip ended. Your pass, trip details and messages are deleted.');
 }
 /* when a pass ends the visible parts disappear at once; trip details stay for 30 days */
@@ -1316,6 +1319,8 @@ async function janitor(){
   if(passActive())await tr(async()=>{const ch=await F.getDocs(F.query(F.collection(db,'chat'),F.where('expiresAt','<',now),F.limit(40)));for(const d of ch.docs)await tr(()=>F.deleteDoc(d.ref));});
   await tr(async()=>{const ds=await F.getDocs(F.query(F.collection(db,'dms'),F.where('members','array-contains',uid)));for(const t of ds.docs){if(tsMs(t.data().expiresAt)<Date.now()){const ms=await F.getDocs(F.collection(db,'dms',t.id,'msgs'));for(const m of ms.docs)await tr(()=>F.deleteDoc(m.ref));await tr(()=>F.deleteDoc(t.ref));}}});
   await tr(async()=>{const t=await F.getDoc(F.doc(db,'trips',uid));if(t.exists()&&tsMs(t.data().retainUntil)<Date.now())await F.deleteDoc(t.ref);});
+  // leaderboard entries untouched for 90 days (phones that stopped using the app)
+  await tr(async()=>{const old=await F.getDocs(F.query(F.collection(db,'board'),F.where('updatedAt','<',F.Timestamp.fromMillis(Date.now()-90*864e5)),F.limit(25)));for(const d of old.docs)await tr(()=>F.deleteDoc(d.ref));});
 }
 function socTick(){
   const p=SOC.profile;
@@ -1323,6 +1328,7 @@ function socTick(){
   else if(p&&passActive()&&!SOC.started&&S.fs&&S.fs.uid)startSocial();
   if(S.fs&&S.fs.uid&&Date.now()-(SOC.lastJan||0)>3600e3){SOC.lastJan=Date.now();janitor();}
   const t=LS.get('trip',null);if(t&&t.retainUntil<Date.now())LS.set('trip',null);
+  if(LB.joined&&S.fs){lbPublish();lbParkListen();}
   updateMeBtn();
 }
 
@@ -1508,6 +1514,225 @@ function openWeather(){
   openSheet('Weather and roads',nodes,{view:'wx'});
 }
 $('wxPill').onclick=openWeather;
+/* =========================================================================
+   11e. Leaderboard: park-wide board, private groups, shareable score card
+   ========================================================================= */
+const LB={joined:LS.get('lb',null),rows:{},unsub:null,parkUnsub:null,scope:'park',period:'week',lastPub:'',lastPubT:0,pubT:null,
+  ranks:LS.get('lbRanks',{}),base:{},pendingJoin:null,err:null};
+if(LB.joined&&!(LB.joined.groups||[]).includes(LB.scope)&&LB.scope!=='park')LB.scope='park';
+S.myScouted=LS.get('myScouted',{});
+const RW_TZ=2*3600e3;                                         // Rwanda time, the same for every phone
+const dayStart=(t=Date.now())=>{const d=new Date(t+RW_TZ);d.setUTCHours(0,0,0,0);return d.getTime()-RW_TZ;};
+const weekStart=(t=Date.now())=>{const d=new Date(t+RW_TZ);const wd=(d.getUTCDay()+6)%7;d.setUTCHours(0,0,0,0);return d.getTime()-wd*864e5-RW_TZ;};
+const dayKey=(t=Date.now())=>new Date(dayStart(t)+RW_TZ).toISOString().slice(0,10);
+const weekKey=(t=Date.now())=>new Date(weekStart(t)+RW_TZ).toISOString().slice(0,10);
+const CODE_CH='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const newCode=()=>Array.from({length:6},()=>CODE_CH[Math.floor(Math.random()*CODE_CH.length)]).join('');
+const groupName=c=>(LB.joined&&LB.joined.gnames&&LB.joined.gnames[c])||c;
+const appURL=()=>location.origin+location.pathname;
+function lbSave(){LS.set('lb',LB.joined);}
+/* every point with the time it was earned, so the board can show today and this week */
+function pointEvents(){const ev=[];
+  for(const x of LISTED){const t=S.life[x.id];if(t)ev.push({t:t.t,p:POINTS[x.rarity]||0});}
+  for(const b of earnedBadges()){let bt=0;for(const g of b.need){let gt=Infinity;for(const id of g)if(S.life[id])gt=Math.min(gt,S.life[id].t);bt=Math.max(bt,gt);}ev.push({t:bt,p:b.bonus});}
+  for(const k in S.myVer)ev.push({t:S.myVer[k].t,p:5});
+  for(const k in S.myScouted)ev.push({t:S.myScouted[k].t,p:3});
+  return ev;}
+function myStats(){const ev=pointEvents(),d0=dayStart(),w0=weekStart();let pts=0,pDay=0,pWk=0;const days=new Set();
+  for(const e of ev){pts+=e.p;if(e.t>=d0)pDay+=e.p;if(e.t>=w0)pWk+=e.p;days.add(dayKey(e.t));}
+  let stk=0,t=Date.now();if(!days.has(dayKey(t)))t-=864e5;while(days.has(dayKey(t))){stk++;t-=864e5;}
+  let rare=null;for(const x of LISTED)if(has(x.id)&&(!rare||x.rarity>rare.rarity))rare=x;
+  const sc=score();return {pts,pDay,pWk,stk,n:sc.n,ver:Object.keys(S.myVer).length,sc:Object.keys(S.myScouted).length,badges:sc.badges.map(b=>b.id),lv:sc.lv[1],rare:rare?rare.id:''};}
+/* your own sightings that other drivers verified earn you 3 points each */
+function checkScouted(){let got=null;
+  for(const r of S.live||[]){if(r.by!==S.device||S.myScouted[r.id])continue;const v=verList(r).find(x=>x.k!==S.device);if(!v)continue;
+    S.myScouted[r.id]={t:Date.now(),type:r.type};got={r,v};}
+  if(got){LS.set('myScouted',S.myScouted);toast(`✅ ${got.v.n?got.v.n.split(' · ')[0]:'Another driver'} verified your ${label(got.r).toLowerCase()} sighting. +3 points`);lbPublish();}}
+async function lbPublish(force){
+  if(!LB.joined||!S.fs)return;
+  const st=myStats(),j=LB.joined;
+  const doc={name:j.name,emoji:j.emoji,pub:!!j.pub,groups:(j.groups||[]).slice(0,5),pts:st.pts,pDay:st.pDay,day:dayKey(),pWk:st.pWk,wk:weekKey(),stk:st.stk,n:st.n,ver:st.ver,sc:st.sc,badges:st.badges.slice(0,12),lv:st.lv,rare:st.rare};
+  const sig=JSON.stringify(doc);if(!force&&sig===LB.lastPub)return;
+  if(!force&&Date.now()-LB.lastPubT<15e3){clearTimeout(LB.pubT);LB.pubT=setTimeout(()=>lbPublish(),15e3);return;}
+  try{const uid=await ensureAuth();const {F,db}=S.fs;await F.setDoc(F.doc(db,'board',uid),{...doc,updatedAt:F.serverTimestamp()});LB.lastPub=sig;LB.lastPubT=Date.now();LB.err=null;}
+  catch(e){LB.err=(e&&e.code)||'error';}
+}
+function lbClean(id,d){if(!d||typeof d.name!=='string')return null;
+  return {uid:id,name:d.name.slice(0,24),emoji:AVATARS.includes(d.emoji)?d.emoji:'🙂',pub:!!d.pub,groups:Array.isArray(d.groups)?d.groups:[],
+    all:Math.max(0,+d.pts||0),day:d.day===dayKey()?Math.max(0,+d.pDay||0):0,week:d.wk===weekKey()?Math.max(0,+d.pWk||0):0,
+    stk:d.day===dayKey()||d.day===dayKey(Date.now()-864e5)?(+d.stk||0):0,n:+d.n||0,ver:+d.ver||0,sc:+d.sc||0,
+    badges:Array.isArray(d.badges)?d.badges.filter(b=>window.BADGES.some(x=>x.id===b)):[],lv:String(d.lv||'').slice(0,30),rare:SPX[d.rare]?d.rare:'',t:tsMs(d.updatedAt)};}
+function lbQuery(scope){const {F,db}=S.fs;return scope==='park'?F.query(F.collection(db,'board'),F.where('pub','==',true),F.limit(400)):F.query(F.collection(db,'board'),F.where('groups','array-contains',scope),F.limit(200));}
+function lbOnRows(scope,snap){LB.rows[scope]=snap.docs.map(d=>lbClean(d.id,d.data())).filter(Boolean);lbRankCheck(scope);if(sheetView==='board'&&LB.scope===scope)openBoard(true);}
+function lbParkListen(){if(LB.parkUnsub||!S.fs||!LB.joined)return;
+  ensureAuth().then(()=>{if(LB.parkUnsub)return;LB.parkUnsub=S.fs.F.onSnapshot(lbQuery('park'),s=>lbOnRows('park',s),e=>{LB.err=e.code;LB.parkUnsub=null;});}).catch(()=>{});}
+function lbListen(){if(LB.unsub){LB.unsub();LB.unsub=null;}if(!S.fs||LB.scope==='park')return;const scope=LB.scope;
+  ensureAuth().then(()=>{LB.unsub=S.fs.F.onSnapshot(lbQuery(scope),s=>lbOnRows(scope,s),e=>{LB.err=e.code;});}).catch(()=>{});}
+function lbMe(){if(!LB.joined||!S.fs||!S.fs.uid)return null;const st=myStats();
+  return {uid:S.fs.uid,name:LB.joined.name,emoji:LB.joined.emoji,all:st.pts,day:st.pDay,week:st.pWk,stk:st.stk,n:st.n,ver:st.ver,sc:st.sc,badges:st.badges,lv:st.lv,rare:st.rare,me:true,t:Date.now()};}
+function lbSorted(scope,period){let rows=(LB.rows[scope]||[]).slice();
+  if(scope==='park')rows=rows.filter(r=>Date.now()-r.t<30*864e5);
+  const me=lbMe();if(me){rows=rows.filter(r=>r.uid!==me.uid);if(scope!=='park'||LB.joined.pub)rows.push(me);}
+  rows=rows.filter(r=>r.me||r[period]>0);
+  rows.sort((a,b)=>b[period]-a[period]||b.ver-a.ver||b.n-a.n||a.name.localeCompare(b.name));
+  for(const r of rows)r.rank=1+rows.filter(x=>x[period]>r[period]).length;
+  return rows;}
+function lbRankCheck(scope){const rows=lbSorted(scope,'week'),me=rows.find(r=>r.me);if(!me||!me.week)return;
+  const key=scope+'|'+weekKey(),prev=LB.ranks[key];
+  if(prev&&me.rank<prev){toast(`🏆 You moved up to #${me.rank} ${scope==='park'?'on the park board':'in '+groupName(scope)} this week!`);try{navigator.vibrate&&navigator.vibrate([80,40,80,40,160]);}catch(e){}}
+  if(prev!==me.rank){LB.ranks[key]=me.rank;LS.set('lbRanks',LB.ranks);}}
+const MEDAL=['🥇','🥈','🥉'];
+function lbRow(r,lead,move){const sp=r.rare?SPX[r.rare]:null;
+  return el('li',{class:'lbrow'+(r.me?' me':'')},el('span',{class:'lbrank',text:r.rank<=3?MEDAL[r.rank-1]:'#'+r.rank}),el('span',{class:'lbav',text:r.emoji}),
+    el('span',{class:'lbtx'},el('b',{text:`${r.name}${r.me?' (you)':''}${lead?' 👑':''}`}),el('small',{text:[r.lv,`${r.n} animals`,r.ver?`✅ ${r.ver}`:'',r.stk>1?`🔥 ${r.stk} days`:'',sp?`💎 ${sp.name}`:''].filter(Boolean).join(' · ')})),
+    el('span',{class:'lbpts'},el('b',{text:String(r[LB.period])}),el('small',{text:move>0?`▲ ${move}`:move<0?`▼ ${-move}`:'pts',class:move>0?'up':move<0?'down':''})));}
+function openBoard(refresh){
+  findTab='board';const keep=refresh&&sheetView==='board'?$('sheetBody').scrollTop:0;
+  const nodes=[tabs('board')];
+  if(!S.fs){nodes.push(el('p',{class:'hint',text:'The leaderboard needs the shared database, which is not set up on this copy of the app.'}));openSheet('Animals',nodes,{view:'board'});return;}
+  if(!LB.joined){nodes.push(...lbJoinForm());openSheet('Animals',nodes,{view:'board'});return;}
+  lbParkListen();
+  const scopes=[['park','🌍 Whole park'],...(LB.joined.groups||[]).map(c=>[c,'👥 '+groupName(c)])];
+  nodes.push(el('div',{class:'lbchips'},...scopes.map(([k,l])=>el('button',{type:'button',class:'lbchip'+(LB.scope===k?' on':''),onclick:()=>{LB.scope=k;lbListen();openBoard();},text:l})),
+    el('button',{type:'button',class:'lbchip add',onclick:openGroupMenu,text:'＋ Group'})));
+  nodes.push(el('div',{class:'seg'},...[['day','Today'],['week','This week'],['all','Overall']].map(([k,l])=>el('button',{type:'button',class:LB.period===k?'on':'',onclick:()=>{LB.period=k;openBoard();},text:l}))));
+  const key=LB.scope+'|'+LB.period+'|'+(LB.period==='day'?dayKey():LB.period==='week'?weekKey():'');
+  const rows=lbSorted(LB.scope,LB.period),me=rows.find(r=>r.me);
+  if(!refresh){LB.base[key]=LS.get('lbSeen:'+key,null);LS.set('lbSeen:'+key,Object.fromEntries(rows.map(r=>[r.uid,r.rank])));}
+  const base=LB.base[key]||{};const mv=r=>base[r.uid]?base[r.uid]-r.rank:0;
+  const wk=lbSorted(LB.scope,'week');const lead=wk.length&&wk[0].week>0?wk[0].uid:null;
+  // your position, and who to catch
+  if(LB.scope==='park'&&!LB.joined.pub)nodes.push(el('div',{class:'lbme'},el('b',{text:'You are hidden from the park board.'}),el('small',{text:'Your groups still see you. Change this under "My leaderboard name".'})));
+  else if(me){const above=rows.filter(r=>r[LB.period]>me[LB.period]).sort((a,b)=>a[LB.period]-b[LB.period])[0];
+    nodes.push(el('div',{class:'lbme'},el('b',{text:me[LB.period]?`You are #${me.rank} of ${rows.length} · ${me[LB.period]} points`:`No points ${LB.period==='day'?'today':LB.period==='week'?'this week':''} yet`}),
+      el('small',{text:me[LB.period]?(above?`${above[LB.period]-me[LB.period]+1} points to pass ${above.emoji} ${above.name}.`:rows.length>1?'You are in the lead. Keep spotting!':'You are the first on this board. Invite others!'):'Tick an animal, verify a sighting or report one that others verify to climb the board.'})));}
+  // podium and list
+  const top=rows.filter(r=>r[LB.period]>0).slice(0,3);
+  if(top.length){const order=[top[1],top[0],top[2]].filter(Boolean);
+    nodes.push(el('div',{class:'podium'},...order.map(r=>el('div',{class:'pod p'+r.rank+(r.me?' me':'')},el('span',{class:'pav',text:r.emoji}),el('b',{text:r.name}),el('small',{text:`${r[LB.period]} pts`}),el('div',{class:'step',text:MEDAL[r.rank-1]||'#'+r.rank})))));}
+  if(rows.length)nodes.push(el('ol',{class:'lblist'},...rows.slice(0,100).map(r=>lbRow(r,r.uid===lead,mv(r)))));
+  else nodes.push(el('p',{class:'hint',text:LB.scope==='park'?'Nobody is on the park board yet. Be the first!':'Nobody in this group has points yet.'}));
+  if(LB.err==='permission-denied')nodes.push(el('p',{class:'fine',text:'The board could not be loaded: the database rules for the leaderboard are not published yet.'}));
+  // share and manage
+  nodes.push(el('button',{class:'primary green',type:'button',onclick:openScoreCard,text:'📣 Share my score'}));
+  if(LB.scope!=='park')nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>shareInvite(LB.scope),text:`➕ Invite people to ${groupName(LB.scope)} · code ${LB.scope}`}));
+  else nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>shareInvite(null),text:'➕ Invite others to the leaderboard'}));
+  nodes.push(el('div',{class:'acts'},el('button',{class:'secondary',type:'button',onclick:()=>openSheet('My leaderboard name',lbJoinForm(true),{view:'lbedit'}),text:'My leaderboard name'}),
+    LB.scope!=='park'?el('button',{class:'secondary no',type:'button',onclick:()=>leaveGroup(LB.scope),text:'Leave group'}):el('button',{class:'secondary no',type:'button',onclick:confirmLeaveBoard,text:'Leave leaderboard'})));
+  nodes.push(el('details',{class:'lbhow'},el('summary',{text:'How points work'}),el('ul',null,
+    el('li',{text:'Each animal you tick: 5, 10, 20 or 40 points, by how rare it is.'}),el('li',{text:'Badges: 30 to 100 bonus points.'}),
+    el('li',{text:'Verify another driver\'s sighting on the spot: +5.'}),el('li',{text:'Your own sighting verified by someone else: +3.'}),
+    el('li',{text:'Today and This week count the points earned in that period (Rwanda time). 🔥 shows days in a row with points, 👑 this week\'s leader.'}),
+    el('li',{text:'Only your leaderboard name, animal, level and points are shared. Your list stays on this phone.'}))));
+  openSheet('Animals',nodes,{view:'board'});if(keep)$('sheetBody').scrollTop=keep;
+}
+function lbJoinForm(edit){
+  const j=LB.joined||{};const nm=el('input',{class:'search',id:'lb-name',maxlength:'24',placeholder:'Leaderboard name, e.g. Elies or Team Prado',value:j.name||(SOC.profile&&SOC.profile.name)||((LS.get('trip',null)||{}).name)||''});
+  let emoji=j.emoji||(SOC.profile&&SOC.profile.emoji)||AVATARS[0];
+  const pick=el('div',{class:'grid5'},...AVATARS.map(a=>{const b=el('button',{type:'button',class:'opt'+(a===emoji?' on':''),text:a,onclick:()=>{emoji=a;pick.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.textContent===a));}});return b;}));
+  const pub=el('input',{type:'checkbox',id:'lb-pub'});pub.checked=edit?!!j.pub:true;
+  const code=el('input',{class:'search',id:'lb-code',maxlength:'6',placeholder:'Group code (optional)',value:LB.pendingJoin||'',style:'text-transform:uppercase'});
+  const go=async()=>{const name=nm.value.trim().slice(0,24);if(!name){toast('Choose a leaderboard name.');nm.focus();return;}
+    const wasJoined=!!LB.joined;LB.joined=Object.assign({groups:[],gnames:{}},LB.joined,{name,emoji,pub:pub.checked});lbSave();
+    const c=(code.value||'').trim().toUpperCase();LB.pendingJoin=null;
+    if(c&&!(LB.joined.groups||[]).includes(c)){const ok=await joinGroup(c,true);if(ok)LB.scope=c;}
+    await lbPublish(true);if(LB.err==='permission-denied')toast('Saved on this phone. The leaderboard rules still need to be published in Firebase.');
+    else toast(wasJoined?'Saved.':`🏆 Welcome to the leaderboard, ${name}!`);lbParkListen();lbListen();openBoard();};
+  const out=[];
+  if(!edit)out.push(el('div',{class:'lbintro'},el('b',{text:'🏆 Compete with other drivers'}),el('small',{text:'Earn points for every animal you tick, every sighting you verify on the spot, and every sighting of yours that others verify. Climb the park board, or make a private board for your family or office.'})));
+  out.push(el('p',{class:'lbl',text:'Leaderboard name'}),nm,el('p',{class:'lbl',text:'Your animal'}),pick,
+    el('label',{class:'toggle',for:'lb-pub'},'Show me on the park-wide board',pub));
+  if(!edit)out.push(el('p',{class:'lbl',text:'Got an invite code? (optional)'}),code);
+  out.push(el('button',{class:'primary green',type:'button',onclick:go,text:edit?'Save':'Join the leaderboard'}),
+    el('p',{class:'fine',text:'Only this name, your animal, level and points are shared with people using the app. You can leave at any time.'}));
+  return out;
+}
+async function joinGroup(code,quiet){
+  code=String(code||'').toUpperCase().replace(/[^A-Z2-9]/g,'');if(code.length!==6){toast('A group code has 6 letters and numbers.');return false;}
+  if(!LB.joined)return false;if((LB.joined.groups||[]).includes(code)){LB.scope=code;return true;}
+  if((LB.joined.groups||[]).length>=5){toast('You can be in up to 5 groups. Leave one first.');return false;}
+  try{await ensureAuth();const {F,db}=S.fs;const g=await F.getDoc(F.doc(db,'lbgroups',code));if(!g.exists()){toast(`No group with the code ${code}.`);return false;}
+    LB.joined.groups=[...(LB.joined.groups||[]),code];LB.joined.gnames=Object.assign({},LB.joined.gnames,{[code]:String(g.data().name||code).slice(0,40)});lbSave();
+    if(!quiet)toast(`👥 You joined ${groupName(code)}.`);await lbPublish(true);return true;}
+  catch(e){toast(e&&e.code==='permission-denied'?'The leaderboard rules are not published in Firebase yet.':'Could not join. Check your signal.');return false;}
+}
+async function createGroup(name){
+  name=String(name||'').trim().slice(0,40);if(!name){toast('Give the group a name.');return;}
+  if((LB.joined.groups||[]).length>=5){toast('You can be in up to 5 groups. Leave one first.');return;}
+  try{const uid=await ensureAuth();const {F,db}=S.fs;let code=newCode();
+    for(let i=0;i<4;i++){const g=await F.getDoc(F.doc(db,'lbgroups',code));if(!g.exists())break;code=newCode();}
+    await F.setDoc(F.doc(db,'lbgroups',code),{name,by:uid,createdAt:F.serverTimestamp()});
+    LB.joined.groups=[...(LB.joined.groups||[]),code];LB.joined.gnames=Object.assign({},LB.joined.gnames,{[code]:name});lbSave();LB.scope=code;
+    await lbPublish(true);lbListen();openBoard();toast(`👥 ${name} created. Code ${code}.`);setTimeout(()=>shareInvite(code),400);}
+  catch(e){toast(e&&e.code==='permission-denied'?'The leaderboard rules are not published in Firebase yet.':'Could not create the group. Check your signal.');}
+}
+function openGroupMenu(){
+  const nm=el('input',{class:'search',maxlength:'40',placeholder:'Group name, e.g. Embassy safari'});
+  const code=el('input',{class:'search',maxlength:'6',placeholder:'6-character code',style:'text-transform:uppercase'});
+  openSheet('Groups',[el('p',{class:'hint',text:'A group is a private board for your family, friends or office. Share its code or link, and only members appear on it.'}),
+    el('p',{class:'lbl',text:'Start a new group'}),nm,el('button',{class:'primary green',type:'button',onclick:()=>createGroup(nm.value),text:'Create group'}),
+    el('p',{class:'lbl',text:'Join with a code'}),code,el('button',{class:'secondary',type:'button',onclick:async()=>{if(await joinGroup(code.value)){lbListen();openBoard();}},text:'Join group'}),
+    el('button',{class:'secondary',type:'button',onclick:()=>openBoard(),text:'Back to the board'})],{view:'groups'});
+}
+function leaveGroup(code){LB.joined.groups=(LB.joined.groups||[]).filter(c=>c!==code);if(LB.joined.gnames)delete LB.joined.gnames[code];lbSave();LB.scope='park';lbListen();lbPublish(true);openBoard();toast(`You left ${groupName(code)}.`);}
+function confirmLeaveBoard(){openSheet('Leave the leaderboard?',[el('p',{class:'hint',text:'Your entry is deleted from the park board and all your groups. Your animal list and points stay on this phone.'}),
+  el('button',{class:'primary',style:'background:#C0392B',type:'button',onclick:async()=>{try{const {F,db}=S.fs;if(S.fs.uid)await F.deleteDoc(F.doc(db,'board',S.fs.uid));}catch(e){}
+    if(LB.parkUnsub){LB.parkUnsub();LB.parkUnsub=null;}if(LB.unsub){LB.unsub();LB.unsub=null;}LB.joined=null;lbSave();LB.rows={};LB.lastPub='';openBoard();toast('You left the leaderboard.');},text:'Leave and delete my entry'}),
+  el('button',{class:'secondary',type:'button',onclick:()=>openBoard(),text:'Stay'})],{view:'lbleave'});}
+async function shareOrCopy(data){
+  try{if(navigator.share){await navigator.share(data);return;}}catch(e){if(e&&e.name==='AbortError')return;}
+  const t=[data.text,data.url].filter(Boolean).join('\n');try{await navigator.clipboard.writeText(t);toast('Copied. Paste it in WhatsApp or a message.');}catch(e){toast(t,null,null,9000);}
+}
+function shareInvite(code){
+  const url=code?`${appURL()}?join=${code}`:`${appURL()}?board=1`;
+  const text=code?`Join my Akagera Live leaderboard "${groupName(code)}" 🏆 Open the link, or enter code ${code} under Animals → Board.`:`Join the Akagera Live leaderboard 🏆 Spot, report and verify animals in Akagera National Park and climb the board.`;
+  shareOrCopy({title:'Akagera Live leaderboard',text,url});
+}
+/* score card image, shared as a picture */
+function drawScoreCard(){
+  const c=document.createElement('canvas');c.width=1080;c.height=1350;const g=c.getContext('2d');
+  const st=myStats(),sc=score(),me=LB.joined||{name:'Me',emoji:'🦁'};
+  const park=LB.joined?lbSorted('park','week').find(r=>r.me):null,grp=LB.scope!=='park'&&LB.joined?lbSorted(LB.scope,'week').find(r=>r.me):null;
+  const bg=g.createLinearGradient(0,0,0,1350);bg.addColorStop(0,'#24452C');bg.addColorStop(1,'#0E2215');g.fillStyle=bg;g.fillRect(0,0,1080,1350);
+  g.fillStyle='rgba(247,199,90,.12)';g.beginPath();g.arc(880,230,260,0,7);g.fill();
+  g.fillStyle='#14301C';g.beginPath();g.moveTo(0,1120);for(let x=0;x<=1080;x+=60)g.lineTo(x,1100+Math.sin(x/90)*18);g.lineTo(1080,1350);g.lineTo(0,1350);g.fill();
+  const EM='"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif',TX='Barlow,"Helvetica Neue",Arial,'+EM;
+  // shrink the font until the line fits the card
+  const T=(t,x,y,font,col,al='center')=>{let f=font.replace(/Barlow,sans-serif|Barlow,.*$/,TX);g.font=f;let px=+(/(\d+)px/.exec(f)||[0,40])[1];
+    while(g.measureText(t).width>980&&px>18){px-=2;f=f.replace(/\d+px/,px+'px');g.font=f;}g.fillStyle=col;g.textAlign=al;g.textBaseline='alphabetic';g.fillText(t,x,y);};
+  T('AKAGERA LIVE',540,110,'700 44px Barlow,sans-serif','#F7C75A');T('Safari leaderboard',540,160,'500 34px Barlow,sans-serif','rgba(255,255,255,.75)');
+  T(me.emoji,540,330,`150px ${EM}`,'#fff');T(me.name,540,430,'800 72px Barlow,sans-serif','#fff');T(sc.lv[1].toUpperCase(),540,490,'700 38px Barlow,sans-serif','#9FD3A9');
+  T(String(st.pts),540,660,'800 190px Barlow,sans-serif','#F7C75A');T('points',540,720,'600 44px Barlow,sans-serif','rgba(255,255,255,.85)');
+  const lines=[];if(park&&park.week)lines.push(`#${park.rank} this week on the park board`);if(grp&&grp.week)lines.push(`#${grp.rank} this week in ${groupName(LB.scope)}`);
+  lines.slice(0,2).forEach((l,i)=>T(l,540,810+i*58,'700 44px Barlow,sans-serif','#fff'));
+  T(`${st.n} of ${LISTED.length} animals  ·  ${sc.badges.length} badge${sc.badges.length===1?'':'s'}`,540,950,'600 40px Barlow,sans-serif','rgba(255,255,255,.92)');
+  T(`✅ ${st.ver} verified${st.stk>1?`   🔥 ${st.stk} days in a row`:''}`,540,1005,'600 40px Barlow,sans-serif','rgba(255,255,255,.92)');
+  let rare=null;for(const x of LISTED)if(has(x.id)&&(!rare||x.rarity>rare.rarity))rare=x;
+  if(rare)T(`💎 Rarest find: ${rare.name}`,540,1070,'700 42px Barlow,sans-serif','#F7C75A');
+  if(sc.badges.length)T(sc.badges.map(b=>b.icon).join(' '),540,1150,`60px ${EM}`,'#fff');
+  T('Can you beat me? Join on',540,1230,'500 34px Barlow,sans-serif','rgba(255,255,255,.75)');T(appURL().replace(/^https?:\/\//,'').replace(/\/$/,''),540,1285,'700 38px Barlow,sans-serif','#fff');
+  return c;
+}
+function openScoreCard(){
+  const c=drawScoreCard();const img=el('img',{class:'scoreimg',alt:'Your score card',src:c.toDataURL('image/png')});
+  let file=null;c.toBlob(b=>{if(b)file=new File([b],'akagera-score.png',{type:'image/png'});},'image/png');
+  const st=myStats(),park=LB.joined?lbSorted('park','week').find(r=>r.me):null;
+  const text=`🦁 ${st.pts} points on Akagera Live${park&&park.week?`, #${park.rank} on the park board this week`:''}. ${st.n} animals ticked, ${st.ver} sightings verified. Can you beat me?`;
+  const url=LB.scope!=='park'?`${appURL()}?join=${LB.scope}`:`${appURL()}?board=1`;
+  openSheet('Share my score',[img,
+    el('button',{class:'primary green',type:'button',onclick:async()=>{try{if(file&&navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],text:text+' '+url,title:'Akagera Live'});return;}}catch(e){if(e&&e.name==='AbortError')return;}shareOrCopy({title:'Akagera Live',text,url});},text:'📣 Share picture'}),
+    el('button',{class:'secondary',type:'button',onclick:()=>shareOrCopy({title:'Akagera Live',text,url}),text:'Share as text'}),
+    el('a',{class:'secondary',href:img.src,download:'akagera-score.png',text:'Save picture'}),
+    el('button',{class:'secondary',type:'button',onclick:()=>openBoard(),text:'Back to the board'})],{view:'scorecard'});
+}
+/* links: ?join=CODE opens the board and joins the group, ?board=1 opens the board */
+function lbHandleLink(){
+  const u=new URLSearchParams(location.search);const code=(u.get('join')||'').toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,6),board=u.has('board');
+  if(!code&&!board)return;history.replaceState(null,'',location.pathname);
+  if(code){LB.pendingJoin=code;if(LB.joined){joinGroup(code).then(ok=>{if(ok){LB.scope=code;lbListen();}openBoard();});return;}}
+  openFind('board');
+}
+
 function saveSet(){LS.set('settings',S.set);}
 /* ---------- map layers ---------- */
 const LAYERS=[
@@ -1554,7 +1779,7 @@ async function verifySighting(r){
   await patchReport(r,{votes:{[S.device]:1},lastSeen:v.t});
   const ok=await patchReport(r,{ver:{[S.device]:v}},{quiet:true});
   if(!ok&&S.fs&&!r.example)toast('Saved as "still there". The verified tick will show once the updated database rules are published.');
-  S.myVer[r.id]={t:v.t,type:r.type};LS.set('myVer',S.myVer);
+  S.myVer[r.id]={t:v.t,type:r.type};LS.set('myVer',S.myVer);setTimeout(()=>lbPublish(),50);
   const pts=r.kind==='animal'?tick(r.type,'seen'):null;
   say(`${label(r)} verified. Thank you.`);try{navigator.vibrate&&navigator.vibrate(60);}catch(e){}
   if(ok||!S.fs)toast(`✅ Verified. +5 points${pts?` · ${label(r)} ticked, +${pts}`:''}`);
@@ -1618,7 +1843,7 @@ async function boot(){
   new ResizeObserver(()=>resize()).observe(cv);resize();fitPark();
   if(document.fonts&&document.fonts.ready)document.fonts.ready.then(redraw);
   updateWxPill();setSync();updateGpsLine();updateCount();setSat(!!S.set.sat);updateMeBtn();updateChatBadge();
-  startGPS();loadWeather();initSharing();loadPhotos();setTimeout(socTick,2500);
+  startGPS();loadWeather();initSharing();loadPhotos();setTimeout(socTick,2500);setTimeout(lbHandleLink,1200);
   window.addEventListener('online',loadPhotos);
   setInterval(()=>{loadWeather();redraw();updateGpsLine();socTick();},60e3);
   window.addEventListener('online',()=>loadWeather(true));
@@ -1626,6 +1851,6 @@ async function boot(){
   setInterval(()=>{if(!S.nav&&S.follow){const p=myPos();if(p&&p.gps){cam.cx=p.x;cam.cy=p.y;redraw();}}},1000);
   if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
   if(!S.set.hideEx&&allReports().some(r=>r.example))banner('No live reports yet. Pins marked EXAMPLE are samples.','Hide',()=>{S.set.hideEx=true;saveSet();hideBanner();redraw();},'ex');
-  window.AKL=S;window.AKLf={previewRoute,centerOn,route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
+  window.AKL=S;window.AKLf={lbPublish,myStats,lbSorted,LB,previewRoute,centerOn,route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
 }
 boot();
