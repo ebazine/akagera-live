@@ -74,7 +74,7 @@ const S = {
   live:[], local: LS.get('local', []), sync:'local', fs:null,
   wx: LS.get('wx', null),
   route:null, nav:null,
-  set: Object.assign({voice:true, tilt:true, wake:true, sat:false, hideEx:false, speedWarn:true}, LS.get('settings', {})),
+  set: Object.assign({voice:true, tilt:true, wake:true, sat:false, hideEx:false, speedWarn:true, closedOk:false}, LS.get('settings', {})),
   device: LS.get('dev', null) || (()=>{const d='d'+Math.random().toString(36).slice(2,10);LS.set('dev',d);return d;})(),
   sim:null, follow:true, view:'browse'
 };
@@ -140,7 +140,7 @@ function buildData(){
   }
   S.juncs=S.pois.filter(p=>p.cat==='junction').sort((a,b)=>a.num-b.num);
   S.links=[];L.approx=null;
-  if(L.osm){const ix=osmIndex(O);placeJunctions(ix);boardLinks(ix);}
+  S.ix=null;if(L.osm){const ix=osmIndex(O);S.ix=ix;placeJunctions(ix);boardLinks(ix);}
   S.named=S.pois.filter(p=>['lake','area','gate','lodge','camp','lookout','picnic','reception','hill'].includes(p.cat));
   for(const w of S.waterNames){if(!S.named.some(n=>n.cat==='lake'&&n.name===w.name))S.named.push({name:w.name,short:w.name,cat:'lake',x:w.x,y:w.y});}
   buildGraph();
@@ -150,15 +150,20 @@ function buildData(){
 function osmIndex(O){
   const C=500,grid=new Map(),X=[],Y=[],segs=[];const n=O.nodes.length/2;
   for(let i=0;i<n;i++){const q=merc(O.nodes[2*i],O.nodes[2*i+1]);X.push(q[0]);Y.push(q[1]);}
-  for(const w of O.ways)for(let k=0;k+1<w.n.length;k++){const a=w.n[k],b=w.n[k+1];const si=segs.length;segs.push([a,b,w.a?1:0]);
+  O.ways.forEach((w,wi)=>{for(let k=0;k+1<w.n.length;k++){const a=w.n[k],b=w.n[k+1];const si=segs.length;segs.push([a,b,w.a?1:0,wi]);
     const x0=Math.floor(Math.min(X[a],X[b])/C),x1=Math.floor(Math.max(X[a],X[b])/C),y0=Math.floor(Math.min(Y[a],Y[b])/C),y1=Math.floor(Math.max(Y[a],Y[b])/C);
-    for(let gx=x0;gx<=x1;gx++)for(let gy=y0;gy<=y1;gy++){const key=gx+','+gy;let l=grid.get(key);if(!l)grid.set(key,l=[]);l.push(si);}}
-  // any=true also counts tracks closed to visitors
-  const near=(x,y,r,any)=>{let best=null;const cr=Math.ceil(r/KG/C),cx=Math.floor(x/C),cy=Math.floor(y/C),seen=new Set();
+    for(let gx=x0;gx<=x1;gx++)for(let gy=y0;gy<=y1;gy++){const key=gx+','+gy;let l=grid.get(key);if(!l)grid.set(key,l=[]);l.push(si);}}});
+  // any=true also counts tracks closed to visitors; closedOnly=true counts only those
+  const near=(x,y,r,any,closedOnly)=>{let best=null;const cr=Math.ceil(r/KG/C),cx=Math.floor(x/C),cy=Math.floor(y/C),seen=new Set();
     for(let gx=cx-cr;gx<=cx+cr;gx++)for(let gy=cy-cr;gy<=cy+cr;gy++){const l=grid.get(gx+','+gy);if(!l)continue;
-      for(const si of l){if(seen.has(si))continue;seen.add(si);const s=segs[si];if(s[2]&&!any)continue;const p=projSeg(x,y,X[s[0]],Y[s[0]],X[s[1]],Y[s[1]]);if(p.d<=r&&(!best||p.d<best.d))best={d:p.d,x:p.qx,y:p.qy};}}
+      for(const si of l){if(seen.has(si))continue;seen.add(si);const s=segs[si];if(s[2]&&!any&&!closedOnly)continue;if(closedOnly&&!s[2])continue;const p=projSeg(x,y,X[s[0]],Y[s[0]],X[s[1]],Y[s[1]]);if(p.d<=r&&(!best||p.d<best.d))best={d:p.d,x:p.qx,y:p.qy,way:O.ways[s[3]]};}}
     return best;};
-  return {near};
+  // ways (index and name) passing within r metres, open or closed
+  const ways=(x,y,r)=>{const out=new Set();const cr=Math.ceil(r/KG/C),cx=Math.floor(x/C),cy=Math.floor(y/C);
+    for(let gx=cx-cr;gx<=cx+cr;gx++)for(let gy=cy-cr;gy<=cy+cr;gy++){const l=grid.get(gx+','+gy);if(!l)continue;
+      for(const si of l){const s=segs[si];if(projSeg(x,y,X[s[0]],Y[s[0]],X[s[1]],Y[s[1]]).d<=r){out.add('#'+s[3]);const nm=O.ways[s[3]].nm;if(nm)out.add(nm);}}}
+    return out;};
+  return {near,ways};
 }
 /* junction stones known only from the park board sit on a road: move them onto the nearest one within 400 m */
 function placeJunctions(ix){
@@ -176,6 +181,8 @@ function boardLinks(ix){
     for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i];const m=Math.max(1,Math.round(gd(a[0],a[1],b[0],b[1])/60));
       for(let t=1;t<m;t++){n++;if(ix.near(a[0]+(b[0]-a[0])*t/m,a[1]+(b[1]-a[1])*t/m,120,true))hit++;}}
     if(n&&hit/n>0.6)continue;
+    // also mapped when both junction stones sit on the same OpenStreetMap way or named road
+    const wa=ix.ways(A.x,A.y,80),wb=ix.ways(B.x,B.y,80);if([...wa].some(k=>wb.has(k)))continue;
     S.links.push({a:k.a,b:k.b,pts,nm:`Track ${k.a}–${k.b}`});A.link=B.link=true;lines.push(pts);
   }
   if(lines.length){const p=new Path2D();for(const l of lines)l.forEach((q,i)=>i?p.lineTo(q[0],q[1]):p.moveTo(q[0],q[1]));S.layers.approx=p;}
@@ -212,8 +219,8 @@ function buildGraph(){
     let v={motorway:80,trunk:70,primary:60,secondary:50,tertiary:40,unclassified:30,residential:25,living_street:15,service:15,road:25,track:20}[w.h]||20;
     if(w.h==='track'){v={grade1:28,grade2:24,grade3:20,grade4:14,grade5:10}[w.t]||20;}
     if(inPark){v=MAJOR.has(w.h)?35:w.h==='track'?Math.min(v,18):Math.min(v,28);if(w.h==='track'&&w.t==='grade1')v=25;}
-    if(w.approx)v=15; w.v=v/3.6; w.inPark=inPark;
-    if(w.a)continue;   // closed to visitors: drawn, never routed
+    if(w.approx||w.a)v=15; w.v=v/3.6; w.inPark=inPark;
+    if(w.a&&!S.set.closedOk)continue;   // marked closed to visitors: drawn, routed only if the driver allows it
     for(let k=0;k+1<w.n.length;k++){const a=w.n[k],b=w.n[k+1];if(a===b||!inN[a]||!inN[b])continue;const len=gd(X[a],Y[a],X[b],Y[b]);const si=segs.length;segs.push([a,b,wi,len]);adj[a].push([b,si,wi]);if(!w.o)adj[b].push([a,si,wi]);}
   }
   const deg=new Uint8Array(N);for(let i=0;i<N;i++){deg[i]=new Set(adj[i].map(e=>e[0])).size;}
@@ -285,6 +292,7 @@ function route(fromX,fromY,toX,toY,destName,opt={}){
   const k=r.pts.length-1;
   if(k>=1&&G.ways[segStart[2]].approx&&!r.approxSeg[1]){r.approxSeg[1]=1;r.approxLen+=r.cum[1];}
   if(k>=1&&G.ways[segEnd[2]].approx&&!r.approxSeg[k]){r.approxSeg[k]=1;r.approxLen+=r.cum[k]-r.cum[k-1];}
+  for(const [si,len] of [[segStart,r.cum[1]||0],[segEnd,k>=1?r.cum[k]-r.cum[k-1]:0]]){const w=G.ways[si[2]];if(w.a){r.closedLen+=len;if(w.nm&&!r.closedNames.includes(w.nm))r.closedNames.push(w.nm);}}
   return r;
 }
 /* several stops in a fixed order, joined into one route */
@@ -292,13 +300,13 @@ function routeMulti(from,stops){
   const pp=penalties();const legs=[];let cx=from.x,cy=from.y;
   for(const st of stops){const r=route(cx,cy,st.x,st.y,st.name,{pp});if(r.error)return {...r,stop:st};legs.push(r);const e=r.pts[r.pts.length-1];cx=e[0];cy=e[1];}
   if(legs.length===1){legs[0].stops=[{...stops[0],d:legs[0].len}];return legs[0];}
-  const pts=[],cum=[],instr=[],warn=[],sights=[],via=[],wps=[],aps=[];let off=0,time=0,ioff=0,approxLen=0;
-  legs.forEach((L,k)=>{const skip=k?1:0;for(let i=skip;i<L.pts.length;i++){pts.push(L.pts[i]);cum.push(L.cum[i]+off);aps.push(L.approxSeg?L.approxSeg[i]:0);}approxLen+=L.approxLen||0;
+  const pts=[],cum=[],instr=[],warn=[],sights=[],via=[],wps=[],aps=[],cn=[];let off=0,time=0,ioff=0,approxLen=0,closedLen=0;
+  legs.forEach((L,k)=>{const skip=k?1:0;for(let i=skip;i<L.pts.length;i++){pts.push(L.pts[i]);cum.push(L.cum[i]+off);aps.push(L.approxSeg?L.approxSeg[i]:0);}approxLen+=L.approxLen||0;closedLen+=L.closedLen||0;for(const n of L.closedNames||[])if(!cn.includes(n))cn.push(n);
     for(const s of L.instr){const o={...s,i:s.i+ioff,d:s.d+off};if(s.type==='arrive'&&k<legs.length-1){o.type='waypoint';o.stop=k+1;o.name=stops[k].name;}if(s.type==='arrive'&&k===legs.length-1){o.stop=k+1;o.name=stops[k].name;}instr.push(o);}
     wps.push({...stops[k],d:L.len+off});
     for(const w of L.warn)if(!warn.includes(w))warn.push(w);for(const w of L.sights)if(!sights.includes(w))sights.push(w);for(const v of L.via)if(!via.includes(v))via.push(v);
     off+=L.len;time+=L.time;ioff=pts.length-1;});
-  return {pts,cum,len:off,time,tpm:time/Math.max(1,off),instr,warn,sights,via:via.slice(0,3),destName:stops[stops.length-1].name,dest:[stops[stops.length-1].x,stops[stops.length-1].y],stops:wps,startOff:legs[0].startOff,endOff:legs[legs.length-1].endOff,start:legs[0].start,approxSeg:Uint8Array.from(aps),approxLen};
+  return {pts,cum,len:off,time,tpm:time/Math.max(1,off),instr,warn,sights,via:via.slice(0,3),destName:stops[stops.length-1].name,dest:[stops[stops.length-1].x,stops[stops.length-1].y],stops:wps,startOff:legs[0].startOff,endOff:legs[legs.length-1].endOff,start:legs[0].start,approxSeg:Uint8Array.from(aps),approxLen,closedLen,closedNames:cn};
 }
 /* best visiting order for up to 6 stops (open path from the car) */
 function bestOrder(from,stops){
@@ -345,9 +353,10 @@ function buildRoute(pts,nodes,pp,destName,costS,dest){
   const sights=[];for(const r of visibleReports().filter(r=>r.kind==='animal')){const [x,y]=merc(r.lon,r.lat);let best=1e9;for(let i=1;i<P.length;i+=1){const p=projSeg(x,y,P[i-1][0],P[i-1][1],P[i][0],P[i][1]);if(p.d<best)best=p.d;}if(best<400)sights.push(r);}
   const via=[...new Set(out.map(s=>s.road).filter(Boolean))].slice(0,3);
   // which parts run on approximate board tracks
-  const approxSeg=new Uint8Array(P.length);let approxLen=0;
-  for(let i=1;i<P.length;i++){if(!(nodeAt[i-1]>=0))continue;const wi=nextWay(nodeAt[i-1],nodeAt[i]);if(wi!=null&&G.ways[wi].approx){approxSeg[i]=1;approxLen+=cum[i]-cum[i-1];}}
-  return {pts:P,cum,len,tpm,time:costS,instr:out,warn,sights,via,destName,dest,approxSeg,approxLen};
+  const approxSeg=new Uint8Array(P.length);let approxLen=0,closedLen=0;const closedNames=new Set();
+  for(let i=1;i<P.length;i++){if(!(nodeAt[i-1]>=0))continue;const wi=nextWay(nodeAt[i-1],nodeAt[i]);if(wi==null)continue;const w=G.ways[wi];
+    if(w.approx){approxSeg[i]=1;approxLen+=cum[i]-cum[i-1];}if(w.a){closedLen+=cum[i]-cum[i-1];if(w.nm)closedNames.add(w.nm);}}
+  return {pts:P,cum,len,tpm,time:costS,instr:out,warn,sights,via,destName,dest,approxSeg,approxLen,closedLen,closedNames:[...closedNames]};
 }
 function nextWay(u,v){if(v==null||v<0)return null;for(const e of S.graph.adj[u])if(e[0]===v)return e[2];return null;}
 function instrText(s,withRoad=true){
@@ -672,7 +681,8 @@ function draw(){
   ctx.strokeStyle='#B5822C';ctx.lineWidth=(wMajor+2.4)*px;ctx.stroke(L.major);
   ctx.strokeStyle=S.set.sat?'#F5E7C8':'#FFFFFF';ctx.lineWidth=wTrack*px;ctx.stroke(L.track);ctx.lineWidth=wMinor*px;ctx.stroke(L.minor);
   ctx.strokeStyle='#F7C75A';ctx.lineWidth=wMajor*px;ctx.stroke(L.major);
-  if(L.closed){ctx.setLineDash([4*px,5*px]);ctx.strokeStyle=S.set.sat?'rgba(255,255,255,.55)':'#9C907C';ctx.lineWidth=Math.max(1.2,wTrack*.55)*px;ctx.stroke(L.closed);ctx.setLineDash([]);}
+  if(L.closed){ctx.strokeStyle=S.set.sat?'rgba(245,231,200,.5)':'rgba(255,255,255,.85)';ctx.lineWidth=(wTrack+1)*px;ctx.stroke(L.closed);
+    ctx.setLineDash([5*px,5*px]);ctx.strokeStyle='#9B3B2C';ctx.lineWidth=Math.max(1.4,wTrack*.65)*px;ctx.stroke(L.closed);ctx.setLineDash([]);}
   if(L.approx){ctx.strokeStyle=S.set.sat?'rgba(245,231,200,.55)':'rgba(255,255,255,.85)';ctx.lineWidth=(wTrack+1)*px;ctx.stroke(L.approx);
     ctx.setLineDash([9*px,7*px]);ctx.strokeStyle='#8A5A2B';ctx.lineWidth=Math.max(1.6,wTrack*.75)*px;ctx.stroke(L.approx);ctx.setLineDash([]);}
   ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=6*px;ctx.stroke(L.park);ctx.strokeStyle='#22351F';ctx.lineWidth=2.6*px;ctx.stroke(L.park);
@@ -979,6 +989,8 @@ function openPoi(p){
   const kind={junction:'Junction stone',gate:'Park gate',reception:'Reception',hq:'Park office',lodge:'Lodge',camp:'Campsite',ranger:'Ranger post',fence:'Fence attendant house',picnic:'Picnic spot',lookout:'Lookout',fuel:'Fuel'}[p.cat]||'Place';
   const nodes=[el('p',{class:'hint',text:kind+(p.note?'. '+p.note:'')+(p.cat==='junction'?({osm:' Position from OpenStreetMap.',snap:' Read off the park board and placed on the nearest road (may be a few hundred metres off).'}[p.src]||' Position read off the park board (about 1 km accuracy).'):'')})];
   if(rel)nodes.push(el('div',{class:'dir'},el('p',null,el('b',{text:'From you: '}),`${fmtD(rel.d)} ${DIRNAME[DIRS.indexOf(rel.dir)]} (straight line).`)));
+  if(S.ix){const c=S.ix.near(p.x,p.y,80,false,true),o=S.ix.near(p.x,p.y,80,false);
+    if(c){const nm=c.way.nm||'a track';nodes.push(el('div',{class:'warnrow',text:`⛔ ${o?`${nm} starts here. It is`:`This is on ${nm}, which is`} marked as closed to visitors on OpenStreetMap, although the park board shows it.${S.set.closedOk?' Routes may use it (Settings).':' Routes avoid it unless you allow closed tracks in Settings.'}`}));}}
   nodes.push(el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:p.x,y:p.y,name:p.cat==='junction'?'Junction '+p.num:(p.short||p.name)}),text:'Navigate here'}));
   nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();setManual(p.lat,p.lon,'Position set here.');},text:'I am here'}));
   openSheet(p.cat==='junction'?'Junction '+p.num:(p.short||p.name),nodes,{view:'poi'});
@@ -1025,6 +1037,7 @@ function showPlan(r,title,top=[]){
   if(r.endOff>400)nodes.push(el('div',{class:'warnrow',style:'background:#EEF2F6;color:#2B3A4A',text:`The destination is ${fmtD(r.endOff)} from the nearest park road, so the route ends at the closest point on the road.`}));
   for(const w of r.warn)nodes.push(el('div',{class:'warnrow',text:`${RD[w.type][2]} ${RD[w.type][1]} on this route (${SEV.find(s=>s[0]===(w.sev||'1'))[1]}), reported ${ago(w.at)}. ${w.sev==='3'?'The route avoids it where it can.':'The route weighs it in.'}`}));
   for(const x of r.sights.slice(0,3))nodes.push(el('div',{class:'warnrow',style:'background:#E4F2E8;color:#1E4D2E',text:`${emoji(x)} ${label(x)} near this route, seen ${hhmm(x.lastSeen)} (${ago(x.lastSeen)})${x.example?' (example)':''}.`}));
+  if(r.closedLen>50)nodes.push(el('div',{class:'warnrow',text:`⛔ ${fmtD(r.closedLen)} of this route is on ${r.closedNames.length?r.closedNames.join(', '):'tracks'} that OpenStreetMap marks as closed to visitors, although the park board shows ${r.closedNames.length>1?'them':'it'}. Check with a ranger before you drive ${r.closedNames.length>1?'them':'it'}.`}));
   if(r.approxLen>100)nodes.push(el('div',{class:'warnrow',style:'background:#F3EADB;color:#5A3D1A',text:`${fmtD(r.approxLen)} of this route is on a track from the park board that is not yet on OpenStreetMap (dashed on the map). The line is approximate, so follow the junction stones.`}));
   if(wetness()>=5)nodes.push(el('div',{class:'warnrow',style:'background:#DCEAF8;color:#1D4F86',text:`${wetness().toFixed(0)} mm of rain in the last 24 h. Tracks may be muddy, so the route prefers the main roads.`}));
   nodes.push(el('div',{class:'acts'},el('button',{class:'secondary',type:'button',onclick:startPreview,text:'▶ Preview step by step'}),el('button',{class:'primary green',type:'button',onclick:startNav,text:'Start'})));
@@ -1484,9 +1497,9 @@ function openWeather(){
 $('wxPill').onclick=openWeather;
 function saveSet(){LS.set('settings',S.set);}
 function openSettings(){
-  const tog=(key,label)=>{const i=el('input',{type:'checkbox',id:'set-'+key});i.checked=!!S.set[key];i.onchange=()=>{S.set[key]=i.checked;saveSet();if(key==='sat')setSat(i.checked);redraw();};return el('label',{class:'toggle',for:'set-'+key},label,i);};
+  const tog=(key,label)=>{const i=el('input',{type:'checkbox',id:'set-'+key});i.checked=!!S.set[key];i.onchange=()=>{S.set[key]=i.checked;saveSet();if(key==='sat')setSat(i.checked);if(key==='closedOk'){buildGraph();toast(i.checked?'Routes may now use tracks marked closed. Check with a ranger first.':'Routes avoid tracks marked closed again.');}redraw();};return el('label',{class:'toggle',for:'set-'+key},label,i);};
   const cfg=window.AKAGERA_FIREBASE;
-  const nodes=[el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help'}),tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),
+  const nodes=[el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help'}),tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),tog('closedOk','Allow routes on tracks marked closed (red dashed, e.g. Rhino Boma Road)'),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();if(S.sim){stopSim();toast('Demo drive stopped.');}else{if(!S.route){toast('Pick a destination with Go first.');return;}startNav();startSim();}},text:S.sim?'Stop demo drive':'Demo drive along the planned route'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();startPick('me');},text:'Set my position by hand'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{S.set.hideEx=!S.set.hideEx;saveSet();closeSheet();redraw();},text:S.set.hideEx?'Show example reports':'Hide example reports'}),

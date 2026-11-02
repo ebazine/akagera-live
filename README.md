@@ -20,7 +20,8 @@ Open it on a phone at **https://ebazine.github.io/akagera-live/** and use *Add t
 ## Data
 
 - Roads, lakes and wetlands: © OpenStreetMap contributors (ODbL), refreshed every Monday by `.github/workflows/osm.yml` into `data/osm.json`. Run the workflow by hand from the *Actions* tab to refresh now.
-- Tracks that are on the park board but missing from OpenStreetMap are listed under `links` in `data/board.json` (junction stone to junction stone, for example 74–72, 72–73, 72–70 and 70–71). They are drawn dashed brown, routed at 15 km/h with a note in the route plan, and dropped automatically once OpenStreetMap maps them. Tracks that OpenStreetMap marks as closed to visitors are drawn thin grey dashed and never used for routes.
+- Tracks that are on the park board but missing from OpenStreetMap are listed under `links` in `data/board.json` (junction stone to junction stone, for example 74–72, 72–73, 72–70 and 70–71). They are drawn dashed brown, routed at 15 km/h with a note in the route plan, and dropped automatically once OpenStreetMap maps them (open or closed).
+- Tracks that OpenStreetMap marks as closed to visitors (`access=no`, for example Rhino Boma Road through junctions 74, 72 and 70, and Rurama Loop) are drawn red dashed. Routes avoid them unless *Allow routes on tracks marked closed* is switched on in Settings; the route plan then warns which closed track it uses.
 - Junction stones, ranger posts and fence houses: traced from the park entrance board (`data/board.json`), accurate to about 1 km.
 - Weather: [Open-Meteo](https://open-meteo.com/). Satellite background: Esri World Imagery.
 - Animal photos: loaded from each species' Wikipedia article (Wikimedia Commons contributors, licences on the linked pages) and cached for offline use. Animal texts are general guidance; always follow ranger instructions.
