@@ -42,11 +42,13 @@
       <button class="fab sos" id="sosBtn" type="button" aria-label="Emergency help">SOS</button>
       <button class="fab" id="zin" type="button" aria-label="Zoom in">+</button>
       <button class="fab" id="zout" type="button" aria-label="Zoom out">&minus;</button>
+      <button class="fab layers" id="layersBtn" type="button" aria-label="Map layers"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5 9-5z" fill="currentColor"/><path d="M3 12.5l9 5 9-5M3 16.5l9 5 9-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
       <button class="fab chat" id="chatBtn" type="button" aria-label="Chat">💬<i id="chatBadge" class="fbadge" hidden>0</i></button>
       <button class="fab me" id="followBtn" type="button" aria-label="Show my position"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l18-8-8 18-2-8-8-2z" fill="currentColor"/></svg></button>
     </div>
     <div class="bgtoggle" role="group" aria-label="Background"><button type="button" data-bg="map" class="on" aria-pressed="true">Map</button><button type="button" data-bg="sat" aria-pressed="false">Satellite</button></div>
     <div class="banner" id="banner" hidden></div>
+    <div class="nearcard" id="nearCard" role="status" aria-live="polite" hidden></div>
     <div class="bottom" id="bottomBar">
       <div class="gpsline" id="gpsline">Starting GPS…</div>
       <div class="btns">

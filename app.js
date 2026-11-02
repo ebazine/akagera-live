@@ -74,7 +74,7 @@ const S = {
   live:[], local: LS.get('local', []), sync:'local', fs:null,
   wx: LS.get('wx', null),
   route:null, nav:null,
-  set: Object.assign({voice:true, tilt:true, wake:true, sat:false, hideEx:false, speedWarn:true, closedOk:false}, LS.get('settings', {})),
+  set: Object.assign({voice:true, tilt:true, wake:true, sat:false, hideEx:false, speedWarn:true, closedOk:false, nearAlert:true}, LS.get('settings', {})),
   device: LS.get('dev', null) || (()=>{const d='d'+Math.random().toString(36).slice(2,10);LS.set('dev',d);return d;})(),
   sim:null, follow:true, view:'browse'
 };
@@ -416,11 +416,12 @@ function clean(id,d){
   const lat=+d.lat,lon=+d.lon;if(!(lat<-1.0&&lat>-2.3&&lon>30.2&&lon<31.2))return null;
   const at=+d.at;if(!(at>1.6e12))return null;
   const votes={};if(d.votes&&typeof d.votes==='object')for(const k in d.votes){const v=+d.votes[k];if(v===1||v===-1)votes[String(k).slice(0,60)]=v;}
+  const ver={};if(d.ver&&typeof d.ver==='object')for(const k in d.ver){const v=d.ver[k];if(v&&typeof v==='object'&&+v.t>1.6e12)ver[String(k).slice(0,60)]={t:+v.t,d:clamp(+v.d||0,0,5000),n:typeof v.n==='string'?v.n.slice(0,60):''};}
   return {id:String(id),kind,type,lat,lon,at,lastSeen:+d.lastSeen>at?+d.lastSeen:at,
     count:COUNTS.includes(d.count)?d.count:null,act:ACTS.includes(d.act)?d.act:null,
     heading:Number.isInteger(d.heading)&&d.heading>=-1&&d.heading<8?d.heading:null,
     rdist:ROADDIST.includes(d.rdist)?d.rdist:null,sev:['1','2','3'].includes(d.sev)?d.sev:null,
-    note:typeof d.note==='string'?d.note.slice(0,200):'',by:typeof d.by==='string'?d.by.slice(0,60):'',uid:typeof d.uid==='string'?d.uid.slice(0,64):'',votes,pending:!!d.pending,example:!!d.example};
+    note:typeof d.note==='string'?d.note.slice(0,200):'',by:typeof d.by==='string'?d.by.slice(0,60):'',uid:typeof d.uid==='string'?d.uid.slice(0,64):'',votes,ver,pending:!!d.pending,example:!!d.example};
 }
 async function initSharing(){
   const cfg=window.AKAGERA_FIREBASE;
@@ -438,7 +439,7 @@ async function initSharing(){
     const q=F.query(F.collection(db,'reports'),F.where('at','>',Date.now()-14*864e5),F.orderBy('at','desc'),F.limit(600));
     F.onSnapshot(q,{includeMetadataChanges:true},snap=>{
       S.live=snap.docs.map(d=>{const o=clean(d.id,d.data());if(o)o.pending=d.metadata.hasPendingWrites;return o;}).filter(Boolean);
-      S.sync=snap.metadata.fromCache?'offline':'live';if(S.live.length)hideBanner();setSync();redraw();refreshSheet();checkSOS();
+      S.sync=snap.metadata.fromCache?'offline':'live';if(S.live.length)hideBanner();setSync();redraw();refreshSheet();checkSOS();checkNear(true);
     },err=>{S.sync='error';setSync();});
   }catch(e){S.sync='local';setSync();}
 }
@@ -456,11 +457,12 @@ async function saveReport(rec){
   else {S.local.push(rec);LS.set('local',S.local);}
   S.set.hideEx=true;saveSet();hideBanner();redraw();setSync();
 }
-async function patchReport(r,patch){
-  if(S.fs&&!r.example){const {F,db}=S.fs;const flat={};for(const k in patch){if(k==='votes'){for(const v in patch.votes)flat['votes.'+v]=patch.votes[v];}else flat[k]=patch[k];}
-    try{await F.updateDoc(F.doc(db,'reports',r.id),flat);}catch(e){toast('Could not send. It will not be saved until you have signal.');}}
-  else {const o=S.local.find(x=>x.id===r.id);if(o){if(patch.votes)o.votes=Object.assign(o.votes||{},patch.votes);for(const k in patch)if(k!=='votes')o[k]=patch[k];LS.set('local',S.local);}}
-  redraw();refreshSheet();
+async function patchReport(r,patch,opt={}){
+  let ok=true;const MAPS=['votes','ver'];
+  if(S.fs&&!r.example){const {F,db}=S.fs;const flat={};for(const k in patch){if(MAPS.includes(k)){for(const v in patch[k])flat[k+'.'+v]=patch[k][v];}else flat[k]=patch[k];}
+    try{await F.updateDoc(F.doc(db,'reports',r.id),flat);}catch(e){ok=false;if(!opt.quiet)toast('Could not send. It will not be saved until you have signal.');}}
+  else {const o=S.local.find(x=>x.id===r.id);if(o){for(const k of MAPS)if(patch[k])o[k]=Object.assign(o[k]||{},patch[k]);for(const k in patch)if(!MAPS.includes(k))o[k]=patch[k];LS.set('local',S.local);}}
+  redraw();refreshSheet();return ok;
 }
 function J(n){return S.juncs.find(j=>j.num===n);}
 function offJ(n,dx,dy){const j=J(n);if(!j)return {lat:-1.8,lon:30.7};const u=unmerc(j.x+dx,j.y+dy);return {lat:u.lat,lon:u.lon};}
@@ -524,8 +526,9 @@ function updateCount(){const c=$('lifeCount');if(c)c.textContent=`${LISTED.filte
 const has=id=>!!S.life[id];
 function earnedBadges(){return window.BADGES.filter(b=>b.need.every(group=>group.some(has)));}
 function score(){let pts=0,n=0;for(const x of LISTED){if(has(x.id)){pts+=POINTS[x.rarity]||0;n++;}}const badges=earnedBadges();for(const b of badges)pts+=b.bonus;
+  const nver=Object.keys(S.myVer||{}).length;pts+=5*nver;
   let lv=window.LEVELS[0],next=null;for(let i=0;i<window.LEVELS.length;i++){if(pts>=window.LEVELS[i][0]){lv=window.LEVELS[i];next=window.LEVELS[i+1]||null;}}
-  return {pts,n,total:LISTED.length,badges,lv,next};}
+  return {pts,n,total:LISTED.length,badges,lv,next,nver};}
 
 /* =========================================================================
    7. Position: GPS, manual fallback, demo drive
@@ -545,7 +548,7 @@ function onFix(c,sim){
   if(!lastFix||gd(lastFix.x,lastFix.y,x,y)>8)lastFix={x,y};
   Object.assign(g,{ok:true,denied:false,x,y,lat:c.latitude,lon:c.longitude,acc:c.accuracy||20,heading,speed:c.speed!=null&&!isNaN(c.speed)?c.speed:g.speed,t:Date.now(),sim:!!sim});
   if(S.nav)navUpdate();
-  updateSpeed();updateGpsLine();redraw();
+  updateSpeed();updateGpsLine();checkNear();redraw();
 }
 let lastSpeedWarn=0;
 function updateSpeed(){
@@ -647,6 +650,8 @@ function drawReport(r,x,y,sel){
   if(im){ctx.save();ctx.beginPath();ctx.arc(x,y,R-2.5,0,7);ctx.clip();const sq=Math.min(im.naturalWidth,im.naturalHeight);ctx.drawImage(im,(im.naturalWidth-sq)/2,(im.naturalHeight-sq)/2,sq,sq,x-R+2.5,y-R+2.5,2*R-5,2*R-5);ctx.restore();}
   else{ctx.font=`${Math.round(R*1.05)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#000';ctx.fillText(emoji(r),x,y+1);}
   if(r.kind==='animal'&&r.count&&r.count!=='1'){ctx.font='700 12px Barlow,sans-serif';const w=ctx.measureText(r.count).width+10;ctx.fillStyle=ring;ctx.beginPath();ctx.roundRect(x+R-10,y-R-6,w,17,8.5);ctx.fill();ctx.fillStyle='#fff';ctx.textAlign='left';ctx.fillText(r.count,x+R-5,y-R+2.5);}
+  if(r.ver&&Object.keys(r.ver).length){const bx=x-R+3,by=y-R+3;ctx.beginPath();ctx.arc(bx,by,8.5,0,7);ctx.fillStyle='#1E8E4E';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();
+    ctx.beginPath();ctx.moveTo(bx-3.8,by+.2);ctx.lineTo(bx-1,by+3);ctx.lineTo(bx+4,by-2.8);ctx.lineWidth=2.3;ctx.strokeStyle='#fff';ctx.stroke();}
   const tl=r.example?'EXAMPLE':r.pending?'SENDING':hhmm(r.lastSeen||r.at);
   ctx.font='700 11.5px Barlow,sans-serif';const w=ctx.measureText(tl).width+10;ctx.fillStyle=r.example?'#6B5200':r.pending?'#1E3A24':'rgba(26,34,25,.88)';ctx.beginPath();ctx.roundRect(x-w/2,y+R+3,w,16,8);ctx.fill();ctx.fillStyle='#fff';ctx.textAlign='center';ctx.fillText(tl,x,y+R+11.5);
   ctx.restore();
@@ -670,20 +675,20 @@ function draw(){
   const px=1/cam.s,L=S.layers;
   ctx.lineJoin='round';ctx.lineCap='round';
   if(S.set.sat){drawTiles(m);ctx.globalAlpha=.25;ctx.fillStyle='#000';}
-  if(!S.set.sat){ctx.fillStyle='#F2EBD3';ctx.fill(L.park);ctx.fillStyle='#BAD3A6';ctx.fill(L.wet,'evenodd');ctx.strokeStyle='#97BA85';ctx.lineWidth=.9*px;ctx.stroke(L.wet);
+  if(!S.set.sat){ctx.fillStyle='#F2EBD3';ctx.fill(L.park);if(LY('water')){ctx.fillStyle='#BAD3A6';ctx.fill(L.wet,'evenodd');ctx.strokeStyle='#97BA85';ctx.lineWidth=.9*px;ctx.stroke(L.wet);}
     if(L.water){ctx.fillStyle='#9DC8EE';ctx.fill(L.water,'evenodd');ctx.strokeStyle='#6EA4D8';ctx.lineWidth=1*px;ctx.stroke(L.water);}
     if(L.shore){ctx.strokeStyle='#3A7DB8';ctx.lineWidth=Math.min(2.2,1.1+cam.s*8)*px;ctx.stroke(L.shore);}}
   ctx.globalAlpha=1;
-  if(L.rivers){ctx.strokeStyle='#6EA4D8';ctx.lineWidth=Math.min(3,1+cam.s*6)*px;ctx.stroke(L.rivers);}
+  if(L.rivers&&LY('water')){ctx.strokeStyle='#6EA4D8';ctx.lineWidth=Math.min(3,1+cam.s*6)*px;ctx.stroke(L.rivers);}
   const zt=clamp(cam.s*25,0,1);
   const nk=S.nav?1.5:1;const wTrack=(1.6+zt*4.4)*nk,wMinor=(2.4+zt*5)*nk,wMajor=(3.4+zt*6)*nk;
   ctx.strokeStyle=S.set.sat?'rgba(0,0,0,.55)':'#A9967A';ctx.lineWidth=(wTrack+2)*px;ctx.stroke(L.track);ctx.lineWidth=(wMinor+2)*px;ctx.stroke(L.minor);
   ctx.strokeStyle='#B5822C';ctx.lineWidth=(wMajor+2.4)*px;ctx.stroke(L.major);
   ctx.strokeStyle=S.set.sat?'#F5E7C8':'#FFFFFF';ctx.lineWidth=wTrack*px;ctx.stroke(L.track);ctx.lineWidth=wMinor*px;ctx.stroke(L.minor);
   ctx.strokeStyle='#F7C75A';ctx.lineWidth=wMajor*px;ctx.stroke(L.major);
-  if(L.closed){ctx.strokeStyle=S.set.sat?'rgba(245,231,200,.5)':'rgba(255,255,255,.85)';ctx.lineWidth=(wTrack+1)*px;ctx.stroke(L.closed);
+  if(L.closed&&LY('closed')){ctx.strokeStyle=S.set.sat?'rgba(245,231,200,.5)':'rgba(255,255,255,.85)';ctx.lineWidth=(wTrack+1)*px;ctx.stroke(L.closed);
     ctx.setLineDash([5*px,5*px]);ctx.strokeStyle='#9B3B2C';ctx.lineWidth=Math.max(1.4,wTrack*.65)*px;ctx.stroke(L.closed);ctx.setLineDash([]);}
-  if(L.approx){ctx.strokeStyle=S.set.sat?'rgba(245,231,200,.55)':'rgba(255,255,255,.85)';ctx.lineWidth=(wTrack+1)*px;ctx.stroke(L.approx);
+  if(L.approx&&LY('closed')){ctx.strokeStyle=S.set.sat?'rgba(245,231,200,.55)':'rgba(255,255,255,.85)';ctx.lineWidth=(wTrack+1)*px;ctx.stroke(L.approx);
     ctx.setLineDash([9*px,7*px]);ctx.strokeStyle='#8A5A2B';ctx.lineWidth=Math.max(1.6,wTrack*.75)*px;ctx.stroke(L.approx);ctx.setLineDash([]);}
   ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=6*px;ctx.stroke(L.park);ctx.strokeStyle='#22351F';ctx.lineWidth=2.6*px;ctx.stroke(L.park);
   // route
@@ -700,18 +705,19 @@ function draw(){
     if(S.nav&&S.nav.prog>0){const q=new Path2D();let started=false;for(let i=0;i<R.pts.length&&R.cum[i]<=S.nav.prog;i++){started?q.lineTo(R.pts[i][0],R.pts[i][1]):q.moveTo(R.pts[i][0],R.pts[i][1]);started=true;}const cp=pointAt(R,S.nav.prog);q.lineTo(cp[0],cp[1]);ctx.strokeStyle='#9BA8B5';ctx.lineWidth=9*px;ctx.stroke(q);}}
   // ---- screen space ----
   ctx.setTransform(dpr,0,0,dpr,0,0);placed=[];hits=[];
-  const reps=visibleReports().map(r=>{const q=merc(r.lon,r.lat);const s=w2s(q[0],q[1],m);return {r,x:s[0],y:s[1]};}).filter(o=>o.x>-60&&o.y>-60&&o.x<W+60&&o.y<H+60);
+  const reps=visibleReports().filter(r=>r.type==='sos'||(r.kind==='animal'?LY('animals'):LY('road'))).map(r=>{const q=merc(r.lon,r.lat);const s=w2s(q[0],q[1],m);return {r,x:s[0],y:s[1]};}).filter(o=>o.x>-60&&o.y>-60&&o.x<W+60&&o.y<H+60);
   for(const o of reps)placed.push([o.x-22,o.y-28,o.x+46,o.y+40]);
   const pos=myPos();let posS=null;if(pos){posS=w2s(pos.x,pos.y,m);placed.push([posS[0]-16,posS[1]-16,posS[0]+16,posS[1]+16]);}
   if(R){const d=w2s(R.pts[R.pts.length-1][0],R.pts[R.pts.length-1][1],m);if(R.stops&&R.stops.length>1){R.stops.forEach((st,k)=>{const q=pointAt(R,st.d);const sp=w2s(q[0],q[1],m);ctx.beginPath();ctx.arc(sp[0],sp[1],13,0,7);ctx.fillStyle='#17663A';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#fff';ctx.stroke();ctx.font='700 14px Barlow,sans-serif';ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(k+1),sp[0],sp[1]+.5);placed.push([sp[0]-14,sp[1]-14,sp[0]+14,sp[1]+14]);});}else{drawFlag(d[0],d[1]);placed.push([d[0]-10,d[1]-40,d[0]+24,d[1]+4]);}
     if(S.nav){const nx=S.nav.next;if(nx&&nx.type!=='arrive'){const q=w2s(R.pts[nx.i][0],R.pts[nx.i][1],m);ctx.beginPath();ctx.arc(q[0],q[1],8,0,7);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle='#0B3D75';ctx.stroke();}}}
-  const showJ=cam.s>0.028,showPL=cam.s>0.016,showArea=cam.s>0.011;
-  for(const p of S.pois){if(p.cat==='lake'||p.cat==='area'||p.cat==='hill')continue;const [x,y]=w2s(p.x,p.y,m);if(x<-30||y<-30||x>W+30||y>H+30)continue;
+  const showJ=cam.s>0.028&&LY('junctions'),showPL=cam.s>0.016,showArea=cam.s>0.011&&LY('names');
+  const grp=c=>c==='junction'?'junctions':['lodge','camp','picnic','lookout'].includes(c)?'stay':'park';
+  for(const p of S.pois){if(p.cat==='lake'||p.cat==='area'||p.cat==='hill')continue;if(p.cat!=='junction'&&!LY(grp(p.cat)))continue;const [x,y]=w2s(p.x,p.y,m);if(x<-30||y<-30||x>W+30||y>H+30)continue;
     if(p.cat==='junction'){if(!showJ)continue;const r=cam.s>0.06?10:8;ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fillStyle='rgba(255,255,255,.92)';ctx.fill();ctx.lineWidth=1.6;ctx.strokeStyle='#555';ctx.stroke();ctx.font=`700 ${r>9?11:9.5}px Barlow,sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle='#333';ctx.fillText(String(p.num),x,y+.5);placed.push([x-r,y-r,x+r,y+r]);hits.push({t:'poi',p,x,y,r:r+6});continue;}
     if(p.cat==='fence'&&cam.s<0.02)continue;const r=p.cat==='fence'?6:cam.s>0.03?11:9;glyph(p.cat,x,y,r);placed.push([x-r-2,y-r-2,x+r+2,y+r+2]);hits.push({t:'poi',p,x,y,r:r+8});}
-  for(const p of S.named){if(p.cat!=='lake')continue;const [x,y]=w2s(p.x,p.y,m);if(x<-120||y<-30||x>W+120||y>H+30)continue;const big=/Ihema|Rwanyakazinga|Hago|Mihindi|Kivumba/.test(p.name);if(!big&&!showArea)continue;textLbl(p.name,x,y,`italic 600 ${big?(cam.s>0.02?17:14.5):13}px Barlow,sans-serif`,'#1E5C99');}
+  for(const p of S.named){if(p.cat!=='lake')continue;const [x,y]=w2s(p.x,p.y,m);if(x<-120||y<-30||x>W+120||y>H+30)continue;const big=/Ihema|Rwanyakazinga|Hago|Mihindi|Kivumba/.test(p.name);if(!LY('names')||(!big&&!showArea))continue;textLbl(p.name,x,y,`italic 600 ${big?(cam.s>0.02?17:14.5):13}px Barlow,sans-serif`,'#1E5C99');}
   if(showArea)for(const p of S.pois){if(p.cat!=='area'&&p.cat!=='hill')continue;const [x,y]=w2s(p.x,p.y,m);if(x<-120||y<-30||x>W+120||y>H+30)continue;textLbl(p.name.toUpperCase().split('').join(' '),x,y,`600 ${cam.s>0.03?12.5:11}px Barlow,sans-serif`,'#6A5232');}
-  if(showPL)for(const p of S.pois){if(['lake','area','junction','fence','hill'].includes(p.cat))continue;const [x,y]=w2s(p.x,p.y,m);if(x<-150||y<-30||x>W+150||y>H+30)continue;textLbl(p.short||p.name,x+14,y,'600 13px Barlow,sans-serif','#26301F','left')||textLbl(p.short||p.name,x-14,y,'600 13px Barlow,sans-serif','#26301F','right');}
+  if(showPL)for(const p of S.pois){if(['lake','area','junction','fence','hill'].includes(p.cat)||!LY(grp(p.cat)))continue;const [x,y]=w2s(p.x,p.y,m);if(x<-150||y<-30||x>W+150||y>H+30)continue;textLbl(p.short||p.name,x+14,y,'600 13px Barlow,sans-serif','#26301F','left')||textLbl(p.short||p.name,x-14,y,'600 13px Barlow,sans-serif','#26301F','right');}
   if(pickPin){const q=merc(pickPin.lon,pickPin.lat);const [x,y]=w2s(q[0],q[1],m);drawFlag(x,y,'#E35F14');}
   reps.sort((a,b)=>(a.r===selected)-(b.r===selected)||a.y-b.y);
   for(const o of reps){drawReport(o.r,o.x,o.y,o.r===selected);hits.unshift({t:'rep',r:o.r,x:o.x,y:o.y,r2:26});}
@@ -753,9 +759,9 @@ function onTap(x,y){
    10. Sheets and flows
    ========================================================================= */
 let backFn=null,sheetView=null,pendingAfterPos=null;
-function openSheet(title,nodes,o={}){$('sheet').classList.toggle('tall',!!o.tall);if(!o.view||!(o.view.startsWith('chat:')||o.view.startsWith('thread:')))SOC.render=null;$('sheetTitle').textContent=title;$('sheetBody').replaceChildren(...nodes.filter(Boolean));$('sheet').hidden=false;sheetView=o.view||null;backFn=o.back||null;$('sheetBack').hidden=!o.back;
+function openSheet(title,nodes,o={}){const nc=$('nearCard');if(nc)nc.hidden=true;$('sheet').classList.toggle('tall',!!o.tall);if(!o.view||!(o.view.startsWith('chat:')||o.view.startsWith('thread:')))SOC.render=null;$('sheetTitle').textContent=title;$('sheetBody').replaceChildren(...nodes.filter(Boolean));$('sheet').hidden=false;sheetView=o.view||null;backFn=o.back||null;$('sheetBack').hidden=!o.back;
   const dots=$('sheetDots');dots.replaceChildren();if(o.step){for(let i=1;i<=o.step[1];i++)dots.append(el('i',{class:i<=o.step[0]?'on':''}));}$('sheetBody').scrollTop=0;}
-function closeSheet(){$('sheet').hidden=true;sheetView=null;selected=null;redraw();}
+function closeSheet(){$('sheet').hidden=true;sheetView=null;selected=null;redraw();setTimeout(()=>checkNear(true),50);}
 $('sheetClose').onclick=closeSheet;$('sheetBack').onclick=()=>backFn&&backFn();
 function refreshSheet(){if($('sheet').hidden)return;if(sheetView==='findanimals')return;if(sheetView==='find')openFind('sightings');else if(sheetView==='guide')openFind('guide');else if(sheetView==='list')openFind('list');else if(sheetView&&sheetView.startsWith('species:'))openSpecies(sheetView.slice(8));else if(sheetView&&sheetView.startsWith('rep:')){const r=allReports().find(x=>x.id===sheetView.slice(4));if(r)openReportView(r,true);}}
 let toastT=null;
@@ -857,7 +863,7 @@ function openFind(tab){
   const recent=all.filter(alive).sort((a,b)=>b.lastSeen-a.lastSeen);
   const row=(r)=>{const q=merc(r.lon,r.lat);const rel=relTo(q[0],q[1]);
     return el('li',null,el('button',{type:'button',onclick:()=>openReportView(r)},pic(r.type,46),
-      el('span',null,el('b',{text:label(r)}),el('small',{text:`${r.example?'Example · ':''}Seen ${hhmm(r.lastSeen)} ${dayWord(r.lastSeen)} · ${ago(r.lastSeen)}`}),el('small',{text:whereText(q[0],q[1])})),
+      el('span',null,el('b',{text:label(r)}),el('small',{text:`${r.example?'Example · ':''}Seen ${hhmm(r.lastSeen)} ${dayWord(r.lastSeen)} · ${ago(r.lastSeen)}${verList(r).length?` · ✅ ${verList(r).length} verified`:''}`}),el('small',{text:whereText(q[0],q[1])})),
       el('span',{class:'r'},rel?fmtD(rel.d):'',rel?el('small',{text:rel.dir}):'')));};
   const winSel=el('select',{class:'opt',id:'winSel','aria-label':'How far back to show'},...[[2,'Last 2 h'],[6,'Last 6 h'],[12,'Last 12 h'],[48,'Last 2 days']].map(([v,t])=>{const o=el('option',{value:String(v),text:t});if((S.animalWin||6)===v)o.selected=true;return o;}));
   winSel.onchange=()=>{S.animalWin=+winSel.value;LS.set('win',S.animalWin);openFind();redraw();};
@@ -947,7 +953,7 @@ function openList(){
   const pct=sc.next?Math.round((sc.pts-sc.lv[0])/(sc.next[0]-sc.lv[0])*100):100;
   nodes.push(el('div',{class:'scorecard'},el('div',{class:'lvl'},el('span',{text:sc.lv[1]}),el('b',{text:`${sc.pts} points`})),
     el('div',{class:'bar'},el('i',{style:`width:${pct}%`})),
-    el('p',{class:'fine',text:`${sc.n} of ${sc.total} animals ticked${sc.next?` · ${sc.next[0]-sc.pts} points to ${sc.next[1]}`:' · top level reached'}`})));
+    el('p',{class:'fine',text:`${sc.n} of ${sc.total} animals ticked${sc.nver?` · ${sc.nver} sighting${sc.nver>1?'s':''} verified (+${5*sc.nver})`:''}${sc.next?` · ${sc.next[0]-sc.pts} points to ${sc.next[1]}`:' · top level reached'}`})));
   nodes.push(el('p',{class:'lbl',text:'Badges'}),el('div',{class:'badges'},...window.BADGES.map(b=>{const got=sc.badges.includes(b);const prog=b.need.filter(g=>g.some(has)).length;
     return el('div',{class:'badge'+(got?' got':''),title:b.text},el('span',{class:'bi',text:b.icon}),el('b',{text:b.name}),el('small',{text:got?`+${b.bonus} points`:`${prog}/${b.need.length} · ${b.text}`}));})));
   const groups=[...new Set(window.SPECIES.map(x=>x.group))];
@@ -966,10 +972,13 @@ function openReportView(r,silent){
   const t=tally(r);const nodes=[];
   nodes.push(el('div',{class:'det-head'},r.kind==='animal'?pic(r.type,64):el('span',{class:'em',text:emoji(r)}),el('div',null,el('b',{text:label(r)}),el('div',{class:'when',text:`${r.kind==='animal'?'Seen':'Reported'} ${hhmm(r.at)} ${dayWord(r.at)}`}),el('p',{class:'hint',text:ago(r.at)+(r.lastSeen-r.at>60e3?` · confirmed ${hhmm(r.lastSeen)} (${ago(r.lastSeen)})`:'')}))));
   const tags=[];if(r.example)tags.push(el('span',{class:'tag ex',text:'Example, not a real report'}));if(r.pending)tags.push(el('span',{class:'tag',text:'Waiting for signal to send'}));
-  if(t.there)tags.push(el('span',{class:'tag',text:`${t.there} confirmed`}));if(t.gone)tags.push(el('span',{class:'tag',text:`${t.gone} say gone`}));
+  const vl=verList(r),conf=Math.max(0,t.there-vl.filter(v=>r.votes[v.k]===1).length);
+  if(conf)tags.push(el('span',{class:'tag',text:`${conf} confirmed`}));if(t.gone)tags.push(el('span',{class:'tag',text:`${t.gone} say gone`}));
   if(r.kind==='road'&&r.type!=='sos')tags.push(el('span',{class:'tag',text:SEV.find(s=>s[0]===(r.sev||'1'))[1]}));
   if(r.act)tags.push(el('span',{class:'tag',text:r.act}));if(r.rdist)tags.push(el('span',{class:'tag',text:r.rdist}));
   if(tags.length)nodes.push(el('div',{class:'meta'},...tags));
+  if(vl.length)nodes.push(el('div',{class:'verbox'},el('b',{text:`✅ Verified on the spot by ${vl.length} ${vl.length===1?'driver':'drivers'}`}),
+    ...vl.slice(0,3).map(v=>el('small',{text:`${v.k===S.device?'You':(v.n||'A driver')} · ${hhmm(v.t)} (${ago(v.t)}) · ${fmtD(v.d)} from the spot`}))));
   const lines=[el('p',null,el('b',{text:'Where: '}),whereText(q[0],q[1])+'.')];
   if(r.kind==='animal'&&r.heading!=null){if(r.heading>=0){const tw=towards(q[0],q[1],r.heading);lines.push(el('p',null,el('b',{text:'Moving: '}),`${DIRNAME[r.heading]}${tw?`, towards ${tw.short||tw.name}`:''}.`));}else lines.push(el('p',null,el('b',{text:'Moving: '}),'not moving when reported.'));}
   const rel=relTo(q[0],q[1]);if(rel)lines.push(el('p',null,el('b',{text:'From you: '}),`${fmtD(rel.d)} ${DIRNAME[DIRS.indexOf(rel.dir)]} (straight line).`));
@@ -981,7 +990,11 @@ function openReportView(r,silent){
   nodes.push(el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:q[0],y:q[1],name:label(r)}),text:'Navigate here'}));
   if(!r.example&&passValid()&&SOC.profile.chat)nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>shareToChat(r),text:'💬 Share in the park chat'}));
   if(r.kind==='animal'&&SPX[r.type]&&SPX[r.type].where)nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>openSpecies(r.type),text:`${SPX[r.type].name}: safety and facts`}));
-  if(!r.example){const mine=r.by===S.device;nodes.push(el('div',{class:'acts'},el('button',{class:'secondary ok',type:'button',onclick:()=>{patchReport(r,{votes:{[S.device]:1},lastSeen:Date.now()});toast('Thanks. Marked as still there.');},text:'Still there'}),el('button',{class:'secondary no',type:'button',onclick:()=>{patchReport(r,{votes:{[S.device]:-1}});closeSheet();toast(mine?'Removed.':'Thanks. Marked as gone.');},text:mine?'Remove my report':'Not there any more'})));}
+  if(r.kind==='animal'){const st=verState(r);
+    if(!st.mine)nodes.push(el('button',{class:'primary green'+(st.ok?'':' soft'),type:'button',onclick:()=>verifySighting(r),text:st.done?'✅ You verified this':'✅ Verify: I can see it'}),
+      el('p',{class:'fine'+(st.ok?' okline':''),text:st.ok?`You are ${fmtD(st.d)} from the spot, close enough to verify.`:st.why}));
+    if(!r.example)nodes.push(el('button',{class:'secondary no',type:'button',onclick:()=>goneHere(r),text:st.mine?'Remove my report':'Not there any more'}));}
+  else if(!r.example){const mine=r.by===S.device;nodes.push(el('div',{class:'acts'},el('button',{class:'secondary ok',type:'button',onclick:()=>{patchReport(r,{votes:{[S.device]:1},lastSeen:Date.now()});toast('Thanks. Marked as still there.');},text:'Still there'}),el('button',{class:'secondary no',type:'button',onclick:()=>{patchReport(r,{votes:{[S.device]:-1}});closeSheet();toast(mine?'Removed.':'Thanks. Marked as gone.');},text:mine?'Remove my report':'Not there any more'})));}
   openSheet(r.kind==='animal'?'Sighting':'Road report',nodes,{view:'rep:'+r.id});redraw();
 }
 function openPoi(p){
@@ -1496,10 +1509,92 @@ function openWeather(){
 }
 $('wxPill').onclick=openWeather;
 function saveSet(){LS.set('settings',S.set);}
+/* ---------- map layers ---------- */
+const LAYERS=[
+  ['animals','🦁','Animal sightings'],['road','⚠️','Road reports'],['junctions','⑦','Junction stones'],
+  ['stay','🏕️','Lodges, camps, picnic spots, lookouts'],['park','⛩️','Gates, ranger posts, offices, fuel'],
+  ['names','🔤','Lake and area names'],['closed','➖','Closed and approximate tracks'],['water','🌿','Rivers and wetlands'],['examples','🧪','Example reports']];
+const LAYER_PRESETS={
+  all:{animals:1,road:1,junctions:1,stay:1,park:1,names:1,closed:1,water:1,examples:1},
+  clean:{animals:1,road:1,junctions:1,stay:0,park:0,names:0,closed:0,water:0,examples:0},
+  animals:{animals:1,road:0,junctions:0,stay:0,park:0,names:0,closed:0,water:0,examples:1}};
+function LY(k){if(k==='examples')return !S.set.hideEx;const l=S.set.layers||{};return l[k]!==0&&l[k]!==false;}
+function setLayer(k,on){if(k==='examples'){S.set.hideEx=!on;}else{S.set.layers=Object.assign({},S.set.layers,{[k]:on?1:0});}saveSet();updateLayersBtn();redraw();}
+function updateLayersBtn(){const b=$('layersBtn');if(b)b.classList.toggle('dot',LAYERS.some(([k])=>k!=='examples'&&!LY(k)));}
+function openLayers(){
+  const rows=LAYERS.map(([k,ic,label])=>{const i=el('input',{type:'checkbox',id:'ly-'+k});i.checked=LY(k);i.onchange=()=>setLayer(k,i.checked);
+    return el('label',{class:'toggle layer',for:'ly-'+k},el('span',{class:'lyic',text:ic}),el('span',{class:'lytx',text:label}),i);});
+  const preset=(id,label)=>el('button',{type:'button',class:'opt',onclick:()=>{const P=LAYER_PRESETS[id];for(const k in P)setLayer(k,!!P[k]);openLayers();},text:label});
+  openSheet('Map layers',[el('div',{class:'opts'},preset('clean','Clean'),preset('animals','Animals only'),preset('all','Everything')),...rows,
+    el('p',{class:'fine',text:'Roads, lakes, your position, your route and emergency alerts always show.'})],{view:'layers'});
+}
+$('layersBtn').onclick=openLayers;updateLayersBtn();
+
+/* ---------- verify sightings on the spot, and alerts when you are near one ---------- */
+const VERIFY_M=400,NEAR_M=400;
+S.myVer=LS.get('myVer',{});            // report id -> {t, type}
+function verList(r){return Object.entries(r.ver||{}).map(([k,v])=>({k,...v})).sort((a,b)=>b.t-a.t);}
+function verState(r){
+  if(r.example)return {ok:false,why:'This is an example sighting, so it cannot be verified.'};
+  if(r.by===S.device)return {ok:false,mine:true,why:'You reported this one, so another driver needs to verify it.'};
+  if(r.ver&&r.ver[S.device])return {ok:false,done:true,why:`You verified this at ${hhmm(r.ver[S.device].t)}.`};
+  const g=S.gps;
+  if(!g.ok||Date.now()-g.t>60e3)return {ok:false,why:'Verifying needs a live GPS fix. Allow location and wait for the blue dot.'};
+  if(g.sim)return {ok:false,why:'Not during the demo drive.'};
+  const q=merc(r.lon,r.lat),d=gd(g.x,g.y,q[0],q[1]);
+  if((g.acc||999)>100)return {ok:false,d,why:`Your GPS is only accurate to about ${Math.round(g.acc)} m. Wait a moment for a better fix.`};
+  if(d>VERIFY_M)return {ok:false,d,why:`You need to be within ${VERIFY_M} m to verify. You are ${fmtD(d)} away.`};
+  return {ok:true,d};
+}
+async function verifySighting(r){
+  const st=verState(r);if(!st.ok){toast(st.why);return;}
+  const p=SOC.profile&&passValid()?SOC.profile:null;
+  const v={t:Date.now(),d:Math.round(st.d)};if(p)v.n=`${p.name}${p.vehicle?' · '+p.vehicle:''}`.slice(0,60);
+  r.ver=Object.assign({},r.ver,{[S.device]:v});
+  await patchReport(r,{votes:{[S.device]:1},lastSeen:v.t});
+  const ok=await patchReport(r,{ver:{[S.device]:v}},{quiet:true});
+  if(!ok&&S.fs&&!r.example)toast('Saved as "still there". The verified tick will show once the updated database rules are published.');
+  S.myVer[r.id]={t:v.t,type:r.type};LS.set('myVer',S.myVer);
+  const pts=r.kind==='animal'?tick(r.type,'seen'):null;
+  say(`${label(r)} verified. Thank you.`);try{navigator.vibrate&&navigator.vibrate(60);}catch(e){}
+  if(ok||!S.fs)toast(`✅ Verified. +5 points${pts?` · ${label(r)} ticked, +${pts}`:''}`);
+  nearDone(r.id);refreshSheet();redraw();
+}
+function goneHere(r){
+  const st=verState(r);if(!st.ok&&!st.mine&&!(st.d!=null&&st.d<=VERIFY_M)){toast(st.why.replace('to verify','to say it has gone'));return;}
+  patchReport(r,{votes:{[S.device]:-1}});nearDone(r.id);closeSheet();toast(st.mine?'Removed.':'Thanks. Marked as gone.');
+}
+const NEAR={id:null,spoken:LS.get('nearSpoken',{}),dismissed:LS.get('nearDismissed',{}),last:0};
+function relWord(g,x,y){const b=brg(g.x,g.y,x,y);if(g.heading==null||(g.speed||0)<1)return DIRNAME[dir8(b)].toLowerCase();const a=angDiff(g.heading,b),s=a<0?'left':'right',A=Math.abs(a);
+  return A<30?'ahead':A<75?`ahead on your ${s}`:A<120?`on your ${s}`:'behind you';}
+function nearDone(id){NEAR.dismissed[id]=Date.now();LS.set('nearDismissed',NEAR.dismissed);if(NEAR.id===id)hideNear();}
+function hideNear(){NEAR.id=null;const c=$('nearCard');if(c)c.hidden=true;}
+function checkNear(force){
+  if(!force&&Date.now()-NEAR.last<2000)return;NEAR.last=Date.now();
+  const g=S.gps;if(!S.set.nearAlert||!g.ok||Date.now()-g.t>60e3||S.preview)return hideNear();
+  const now=Date.now();for(const k in NEAR.dismissed)if(now-NEAR.dismissed[k]>6*3600e3)delete NEAR.dismissed[k];
+  let best=null;
+  for(const r of visibleReports()){if(r.kind!=='animal'||r.by===S.device||(r.example&&!S.sim)||r.votes[S.device]===-1||(r.ver&&r.ver[S.device])||NEAR.dismissed[r.id])continue;
+    const q=merc(r.lon,r.lat),d=gd(g.x,g.y,q[0],q[1]);const lim=r.id===NEAR.id?NEAR_M+150:NEAR_M;if(d<=lim&&(!best||d<best.d))best={r,d,q};}
+  if(!best)return hideNear();
+  const {r,d,q}=best,where=relWord(g,q[0],q[1]),nv=verList(r).length;
+  const c=$('nearCard');if(!$('sheet').hidden){c.hidden=true;return;}   // back when the sheet closes
+  c.replaceChildren(el('button',{type:'button',class:'nc-main',onclick:()=>openReportView(r)},pic(r.type,48),
+      el('span',null,el('b',{text:`${label(r)} ${fmtD(d)} ${where}`}),el('small',{text:`Seen ${ago(r.lastSeen)}${nv?` · ✅ ${nv} verified`:' · not verified yet'}${r.example?' · example':''}`}))),
+    el('div',{class:'nc-acts'},el('button',{type:'button',class:'ok',onclick:()=>verifySighting(r),text:'✅ I see it'}),el('button',{type:'button',class:'no',onclick:()=>goneHere(r),text:'Not here'}),el('button',{type:'button',class:'x','aria-label':'Dismiss',onclick:()=>nearDone(r.id),text:'×'})));
+  const host=c.parentElement.getBoundingClientRect();
+  if(S.nav){   // while driving: under the turn instruction, so the car and the road ahead stay visible
+    let top=0;for(const id of ['navTop','navThen','navWarn']){const e=$(id);if(e&&!e.hidden)top=Math.max(top,e.getBoundingClientRect().bottom);}
+    c.style.top=Math.max(10,top-host.top+8)+'px';c.style.bottom='auto';}
+  else{const br=$('bottomBar').getBoundingClientRect();c.style.bottom=Math.max(10,host.bottom-br.top+8)+'px';c.style.top='auto';}
+  c.hidden=false;
+  if(NEAR.id!==r.id){NEAR.id=r.id;if(!NEAR.spoken[r.id]){NEAR.spoken[r.id]=now;LS.set('nearSpoken',NEAR.spoken);
+    say(`${label(r)} reported ${Math.round(d/10)*10} metres ${where}. Tap I see it to verify.`);try{navigator.vibrate&&navigator.vibrate([120,60,120]);}catch(e){}}}
+}
 function openSettings(){
-  const tog=(key,label)=>{const i=el('input',{type:'checkbox',id:'set-'+key});i.checked=!!S.set[key];i.onchange=()=>{S.set[key]=i.checked;saveSet();if(key==='sat')setSat(i.checked);if(key==='closedOk'){buildGraph();toast(i.checked?'Routes may now use tracks marked closed. Check with a ranger first.':'Routes avoid tracks marked closed again.');}redraw();};return el('label',{class:'toggle',for:'set-'+key},label,i);};
+  const tog=(key,label)=>{const i=el('input',{type:'checkbox',id:'set-'+key});i.checked=!!S.set[key];i.onchange=()=>{S.set[key]=i.checked;saveSet();if(key==='sat')setSat(i.checked);if(key==='nearAlert')checkNear(true);if(key==='closedOk'){buildGraph();toast(i.checked?'Routes may now use tracks marked closed. Check with a ranger first.':'Routes avoid tracks marked closed again.');}redraw();};return el('label',{class:'toggle',for:'set-'+key},label,i);};
   const cfg=window.AKAGERA_FIREBASE;
-  const nodes=[el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help'}),tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),tog('closedOk','Allow routes on tracks marked closed (red dashed, e.g. Rhino Boma Road)'),
+  const nodes=[el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help'}),tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('nearAlert','Alert me near other drivers\' sightings'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),tog('closedOk','Allow routes on tracks marked closed (red dashed, e.g. Rhino Boma Road)'),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();if(S.sim){stopSim();toast('Demo drive stopped.');}else{if(!S.route){toast('Pick a destination with Go first.');return;}startNav();startSim();}},text:S.sim?'Stop demo drive':'Demo drive along the planned route'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();startPick('me');},text:'Set my position by hand'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{S.set.hideEx=!S.set.hideEx;saveSet();closeSheet();redraw();},text:S.set.hideEx?'Show example reports':'Hide example reports'}),

@@ -12,6 +12,8 @@ Open it on a phone at **https://ebazine.github.io/akagera-live/** and use *Add t
 - **Report in three or four taps.** Animals: species, how many, which way they are moving (relative to your car). Road problems: type and severity. Your GPS position is used automatically.
 - **Timestamps everywhere.** Every sighting shows the clock time it was seen and how long ago. *Animals* lists the latest sightings and the last time each species was seen (up to 7 days).
 - **Road reports expire with the weather.** Mud, flooding and slippery climbs last a base time plus extra hours per millimetre of rain (Open-Meteo data for the north, centre and south of the park), and longer if it rains again. Other problems have fixed lifetimes (fallen tree 3 days, closure 7 days, potholes 14 days, stuck vehicle 6 h, animals on the road 1 h). Anyone can mark a report *still there* or *gone*.
+- **Verify sightings on the spot.** Within 400 m of another driver's sighting, with a live GPS fix (accurate to 100 m or better), you can tap *I see it*. The sighting gets a green tick, its time is refreshed, the verifier's name and vehicle (from the trip pass) and distance are shown, the animal is ticked on your list and you earn 5 points. *Not there any more* also needs you to be near (the reporter can always remove their own). The app alerts you, by voice and vibration, when you come within 400 m of a sighting, with *I see it* / *Not here* buttons. This works while the app is open on screen (a web app cannot alert in the background). Turn it off in Settings.
+- **Map layers.** The layers button on the right shows or hides sightings, road reports, junction stones, lodges and camps, gates and ranger posts, names, closed tracks, rivers and wetlands, and example reports, with *Clean*, *Animals only* and *Everything* presets.
 - **Routes avoid trouble.** Impassable reports block the road for routing, 4x4-only and caution reports weigh it down, and after heavy rain the router prefers main roads over tracks.
 - **Animal guide.** 34 animals of Akagera with photos, where to find them, and what to do next to your car: warning signs, do's and never's, plus 10 rules for driving among animals.
 - **Score sheet.** Every animal you report is ticked off. Points by rarity, badges (Big Five, Rhino double, Lake life, Antelope ace and more) and levels from Rookie to Akagera Legend.
@@ -58,8 +60,9 @@ service cloud.firestore {
         && request.resource.data.at is number
         && request.resource.data.note is string && request.resource.data.note.size() <= 200
         && (!('uid' in request.resource.data) || (signedIn() && request.resource.data.uid == request.auth.uid));
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes','lastSeen','note','act','rdist'])
-        && request.resource.data.note is string && request.resource.data.note.size() <= 200;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes','lastSeen','note','act','rdist','ver'])
+        && request.resource.data.note is string && request.resource.data.note.size() <= 200
+        && (!('ver' in request.resource.data) || (request.resource.data.ver is map && request.resource.data.ver.size() <= 100));
       allow delete: if false;
     }
 

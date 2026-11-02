@@ -19,8 +19,9 @@ service cloud.firestore {
         && request.resource.data.at is number
         && request.resource.data.note is string && request.resource.data.note.size() <= 200
         && (!('uid' in request.resource.data) || (signedIn() && request.resource.data.uid == request.auth.uid));
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes','lastSeen','note','act','rdist'])
-        && request.resource.data.note is string && request.resource.data.note.size() <= 200;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes','lastSeen','note','act','rdist','ver'])
+        && request.resource.data.note is string && request.resource.data.note.size() <= 200
+        && (!('ver' in request.resource.data) || (request.resource.data.ver is map && request.resource.data.ver.size() <= 100));
       allow delete: if false;
     }
 
