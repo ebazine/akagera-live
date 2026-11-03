@@ -317,14 +317,14 @@ function route(fromX,fromY,toX,toY,destName,opt={}){
 function routeMulti(from,stops){
   const pp=penalties();const legs=[];let cx=from.x,cy=from.y;
   for(const st of stops){const r=route(cx,cy,st.x,st.y,st.name,{pp});if(r.error)return {...r,stop:st};legs.push(r);const e=r.pts[r.pts.length-1];cx=e[0];cy=e[1];}
-  if(legs.length===1){legs[0].stops=[{...stops[0],d:legs[0].len}];return legs[0];}
+  if(legs.length===1){legs[0].stops=[{...stops[0],d:legs[0].len}];legs[0].legs=[{len:legs[0].len,time:legs[0].time}];return legs[0];}
   const pts=[],cum=[],instr=[],warn=[],sights=[],via=[],wps=[],aps=[],cn=[],on=[];let off=0,time=0,ioff=0,approxLen=0,closedLen=0,offLen=0;
   legs.forEach((L,k)=>{const skip=k?1:0;for(let i=skip;i<L.pts.length;i++){pts.push(L.pts[i]);cum.push(L.cum[i]+off);aps.push(L.approxSeg?L.approxSeg[i]:0);}approxLen+=L.approxLen||0;closedLen+=L.closedLen||0;offLen+=L.offLen||0;for(const n of L.offNames||[])if(!on.includes(n))on.push(n);for(const n of L.closedNames||[])if(!cn.includes(n))cn.push(n);
     for(const s of L.instr){const o={...s,i:s.i+ioff,d:s.d+off};if(s.type==='arrive'&&k<legs.length-1){o.type='waypoint';o.stop=k+1;o.name=stops[k].name;}if(s.type==='arrive'&&k===legs.length-1){o.stop=k+1;o.name=stops[k].name;}instr.push(o);}
     wps.push({...stops[k],d:L.len+off});
     for(const w of L.warn)if(!warn.includes(w))warn.push(w);for(const w of L.sights)if(!sights.includes(w))sights.push(w);for(const v of L.via)if(!via.includes(v))via.push(v);
     off+=L.len;time+=L.time;ioff=pts.length-1;});
-  return {pts,cum,len:off,time,tpm:time/Math.max(1,off),instr,warn,sights,via:via.slice(0,3),destName:stops[stops.length-1].name,dest:[stops[stops.length-1].x,stops[stops.length-1].y],stops:wps,startOff:legs[0].startOff,endOff:legs[legs.length-1].endOff,start:legs[0].start,approxSeg:Uint8Array.from(aps),approxLen,closedLen,closedNames:cn,offLen,offNames:on};
+  return {pts,cum,len:off,time,tpm:time/Math.max(1,off),instr,warn,sights,via:via.slice(0,3),destName:stops[stops.length-1].name,dest:[stops[stops.length-1].x,stops[stops.length-1].y],legs:legs.map(L=>({len:L.len,time:L.time})),stops:wps,startOff:legs[0].startOff,endOff:legs[legs.length-1].endOff,start:legs[0].start,approxSeg:Uint8Array.from(aps),approxLen,closedLen,closedNames:cn,offLen,offNames:on};
 }
 /* best visiting order for up to 6 stops (open path from the car) */
 function bestOrder(from,stops){
@@ -872,7 +872,7 @@ function draw(){
   const reps=visibleReports().filter(r=>r.type==='sos'||(r.kind==='animal'?LY('animals'):LY('road'))).map(r=>{const q=merc(r.lon,r.lat);const s=w2s(q[0],q[1],m);return {r,x:s[0],y:s[1]};}).filter(o=>o.x>-60&&o.y>-60&&o.x<W+60&&o.y<H+60);
   for(const o of reps)placed.push([o.x-22,o.y-28,o.x+46,o.y+40]);
   const pos=myPos();let posS=null;if(pos){posS=w2s(pos.x,pos.y,m);placed.push([posS[0]-22,posS[1]-62,posS[0]+22,posS[1]+30]);}
-  if(R){const d=w2s(R.pts[R.pts.length-1][0],R.pts[R.pts.length-1][1],m);if(R.stops&&R.stops.length>1){R.stops.forEach((st,k)=>{const q=pointAt(R,st.d);const sp=w2s(q[0],q[1],m);ctx.beginPath();ctx.arc(sp[0],sp[1],13,0,7);ctx.fillStyle='#17663A';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#fff';ctx.stroke();ctx.font='700 14px Barlow,sans-serif';ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(k+1),sp[0],sp[1]+.5);placed.push([sp[0]-14,sp[1]-14,sp[0]+14,sp[1]+14]);});}else{drawFlag(d[0],d[1]);placed.push([d[0]-10,d[1]-40,d[0]+24,d[1]+4]);}
+  if(R){const d=w2s(R.pts[R.pts.length-1][0],R.pts[R.pts.length-1][1],m);if(planOn()){}else if(R.stops&&R.stops.length>1){R.stops.forEach((st,k)=>{const q=pointAt(R,st.d);const sp=w2s(q[0],q[1],m);ctx.beginPath();ctx.arc(sp[0],sp[1],13,0,7);ctx.fillStyle='#17663A';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#fff';ctx.stroke();ctx.font='700 14px Barlow,sans-serif';ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(k+1),sp[0],sp[1]+.5);placed.push([sp[0]-14,sp[1]-14,sp[0]+14,sp[1]+14]);});}else{drawFlag(d[0],d[1]);placed.push([d[0]-10,d[1]-40,d[0]+24,d[1]+4]);}
     if(S.nav){const nx=S.nav.next;if(nx&&nx.type!=='arrive'){const q=w2s(R.pts[nx.i][0],R.pts[nx.i][1],m);ctx.beginPath();ctx.arc(q[0],q[1],8,0,7);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle='#0B3D75';ctx.stroke();}}}
   const showJ=cam.s>0.028&&LY('junctions'),showPL=cam.s>0.016,showArea=cam.s>0.011&&LY('names');
   const grp=c=>c==='junction'?'junctions':['lodge','camp','picnic','lookout'].includes(c)?'stay':'park';
@@ -882,12 +882,16 @@ function draw(){
   for(const p of S.named){if(p.cat!=='lake')continue;const [x,y]=w2s(p.x,p.y,m);if(x<-120||y<-30||x>W+120||y>H+30)continue;const big=/Ihema|Rwanyakazinga|Hago|Mihindi|Kivumba/.test(p.name);if(!LY('names')||(!big&&!showArea))continue;textLbl(p.name,x,y,`italic 600 ${big?(cam.s>0.02?17:14.5):13}px Barlow,sans-serif`,'#1E5C99');}
   if(showArea)for(const p of S.pois){if(p.cat!=='area'&&p.cat!=='hill')continue;const [x,y]=w2s(p.x,p.y,m);if(x<-120||y<-30||x>W+120||y>H+30)continue;textLbl(p.name.toUpperCase().split('').join(' '),x,y,`600 ${cam.s>0.03?12.5:11}px Barlow,sans-serif`,'#6A5232');}
   if(showPL)for(const p of S.pois){if(['lake','area','junction','fence','hill'].includes(p.cat)||!LY(grp(p.cat)))continue;const [x,y]=w2s(p.x,p.y,m);if(x<-150||y<-30||x>W+150||y>H+30)continue;textLbl(p.short||p.name,x+14,y,'600 13px Barlow,sans-serif','#26301F','left')||textLbl(p.short||p.name,x-14,y,'600 13px Barlow,sans-serif','#26301F','right');}
+  if(planOn()){const st=plStart();if(st){const [sx,sy]=w2s(st.x,st.y,m);if(PLAN.start.kind==='place')planPin(sx,sy,'S','#2369B0');}
+    PLAN.stops.forEach((s,k)=>{const q=merc(s.lon,s.lat);const [px_,py]=w2s(q[0],q[1],m);planPin(px_,py,String(k+1),'#E35F14');});
+    if(PLAN.end.startsWith('gate:')&&PLAN.stops.length){const g=plGates().find(p=>p.name===PLAN.end.slice(5));if(g){const [gx,gy]=w2s(g.x,g.y,m);planPin(gx,gy,'⚑','#17663A');}}}
   if(pickPin){const q=merc(pickPin.lon,pickPin.lat);const [x,y]=w2s(q[0],q[1],m);drawFlag(x,y,'#E35F14');}
   reps.sort((a,b)=>(a.r===selected)-(b.r===selected)||a.y-b.y);
   for(const o of reps){drawReport(o.r,o.x,o.y,o.r===selected);hits.unshift({t:'rep',r:o.r,x:o.x,y:o.y,r2:26});}
   if(pos){const h=pos.heading!=null?(pos.heading*RAD+cam.rot):null;drawCar(posS[0],posS[1],h,pos.gps);hits.unshift({t:'me',x:posS[0],y:posS[1]-12,r:32});}
   if(anim)requestAnimationFrame(draw);
 }
+function planPin(x,y,t,col){ctx.save();ctx.shadowColor='rgba(0,0,0,.3)';ctx.shadowBlur=5;ctx.shadowOffsetY=2;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-9,y-14);ctx.arc(x,y-22,12,Math.PI*.78,Math.PI*.22);ctx.closePath();ctx.fillStyle=col;ctx.fill();ctx.restore();ctx.lineWidth=2.5;ctx.strokeStyle='#fff';ctx.stroke();ctx.font='800 13px Barlow,sans-serif';ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(t,x,y-22);placed.push([x-13,y-36,x+13,y]);}
 function drawFlag(x,y,col='#17663A'){ctx.save();ctx.lineWidth=3;ctx.strokeStyle='#222';ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y-34);ctx.stroke();ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(x,y-34);ctx.lineTo(x+22,y-27);ctx.lineTo(x,y-20);ctx.closePath();ctx.fill();ctx.beginPath();ctx.arc(x,y,4,0,7);ctx.fillStyle='#222';ctx.fill();ctx.restore();}
 
 /* =========================================================================
@@ -910,6 +914,12 @@ document.querySelectorAll('[data-bg]').forEach(b=>b.onclick=()=>{setSat(b.datase
 $('followBtn').onclick=()=>{const p=myPos();if(!p){openSetPos();return;}S.follow=true;$('followBtn').classList.add('on');centerOn(p.x,p.y,Math.max(cam.s,0.05));};
 let pickPin=null;
 function onTap(x,y){
+  if(pickMode==='plan'||pickMode==='planstart'){const [wx,wy]=s2w(x,y);let o=null;
+    for(const h of hits)if(h.t==='rep'&&Math.hypot(h.x-x,h.y-y)<h.r2){const m=merc(h.r.lon,h.r.lat);o={name:`${label(h.r)} (seen ${hhmm(h.r.lastSeen)})`,x:m[0],y:m[1],kind:'animal'};break;}
+    if(!o)for(const h of hits)if(h.t==='poi'&&Math.hypot(h.x-x,h.y-y)<h.r){const p=h.p;o={name:p.cat==='junction'?'Junction '+p.num:(p.short||p.name),x:p.x,y:p.y,kind:p.cat};break;}
+    if(!o)o=plNameAt(wx,wy);
+    if(pickMode==='planstart'){const u=unmerc(o.x,o.y);PLAN.start={kind:'place',name:o.name,lat:+u.lat.toFixed(6),lon:+u.lon.toFixed(6)};planSave();endPick();openPlanner(false,true);return;}
+    if(addPlanStop(o,true)){try{navigator.vibrate&&navigator.vibrate(25);}catch(e){}planShow(false);PL.updBar&&PL.updBar();}return;}
   if(pickMode){const [wx,wy]=s2w(x,y);const u=unmerc(wx,wy);const k=pickMode;endPick();
     if(k==='me'){setManual(u.lat,u.lon,'Position set by hand.');}
     else if(k==='dest'){previewRoute({x:wx,y:wy,name:'Dropped pin'});}
@@ -934,7 +944,7 @@ function toast(t,btn,fn,ms=3600){const e=$('toast');e.replaceChildren(...[el('sp
 function banner(text,btn,fn,cls){const b=$('banner');b.className='banner'+(cls?' '+cls:'');b.replaceChildren(...[el('p',{text}),btn?el('button',{type:'button',onclick:fn,text:btn}):null].filter(Boolean));b.hidden=false;}
 function hideBanner(){$('banner').hidden=true;}
 function startPick(kind){pickMode=kind;$('sheet').hidden=true;banner(kind==='me'?'Tap the map where you are.':'Tap the map where you want to go.','Cancel',()=>endPick());}
-function endPick(){pickMode=null;hideBanner();}
+function endPick(){pickMode=null;hideBanner();const b=$('planBar');if(b)b.hidden=true;}
 function needPos(then){const p=myPos();if(p)return p;pendingAfterPos=then;openSetPos();return null;}
 function openSetPos(){
   const g=S.gps,gpsOk=g.ok&&Date.now()-g.t<90e3;const nodes=[];
@@ -1156,6 +1166,7 @@ function openReportView(r,silent){
   {const who=r.uid?personByUid(r.uid):null;if(who)nodes.push(el('p',{class:'fine',text:`Reported by ${who.emoji} ${who.name} · ${vehLabel(who)}`}));else if(r.by===S.device)nodes.push(el('p',{class:'fine',text:'Reported by you'}));}
   nodes.push(el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:q[0],y:q[1],name:label(r)}),text:'Navigate here'}));
   if(!r.example&&passValid()&&SOC.profile.chat)nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>shareToChat(r),text:'💬 Share in the park chat'}));
+  if(r.kind==='animal')nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>{addPlanStop({name:`${label(r)} (seen ${hhmm(r.lastSeen)})`,x:q[0],y:q[1],kind:'animal'});closeSheet();},text:'➕ Add to trip plan'}));
   if(r.kind==='animal'&&SPX[r.type]&&SPX[r.type].where)nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>openSpecies(r.type),text:`${SPX[r.type].name}: safety and facts`}));
   if(r.kind==='animal'){const st=verState(r);
     if(!st.mine)nodes.push(el('button',{class:'primary green'+(st.ok?'':' soft'),type:'button',onclick:()=>verifySighting(r),text:st.done?'✅ You verified this':'✅ Verify: I can see it'}),
@@ -1174,7 +1185,8 @@ function openPoi(p){
       if(w.off)nodes.push(el('div',{class:'warnrow',style:'background:#FFF1D6;color:#6A4300',text:`ⓘ ${o?`${nm} starts here.`:`This is on ${nm}.`} The official park map shows it as a road, but OpenStreetMap marks it closed to visitors. ${S.set.officialOk!==false?'Routes use it, with a reminder to check at reception.':'Routes avoid it (Settings).'}`}));
       else if(w.a==='nt')nodes.push(el('div',{class:'warnrow',text:`⛔ ${o?'A no-through road starts here':'This track is a no-through road'}: ${w.nt}. The official park map closes it to other visitors, so routes avoid it.`}));
       else nodes.push(el('div',{class:'warnrow',text:`⛔ ${o?`${nm} starts here. It is`:`This is on ${nm}, which is`} marked as closed to visitors on OpenStreetMap and is not on the official park map.${S.set.closedOk?' Routes may use it (Settings).':' Routes avoid it unless you allow closed tracks in Settings.'}`}));}}
-  nodes.push(el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:p.x,y:p.y,name:p.cat==='junction'?'Junction '+p.num:(p.short||p.name)}),text:'Navigate here'}));
+  nodes.push(el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:p.x,y:p.y,name:p.cat==='junction'?'Junction '+p.num:(p.short||p.name)}),text:'Navigate here'}),
+    el('button',{class:'secondary',type:'button',onclick:()=>{addPlanStop({name:p.cat==='junction'?'Junction '+p.num:(p.short||p.name),x:p.x,y:p.y,kind:p.cat});closeSheet();},text:'➕ Add to trip plan'}));
   nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();setManual(p.lat,p.lon,'Position set here.');},text:'I am here'}));
   openSheet(p.cat==='junction'?'Junction '+p.num:(p.short||p.name),nodes,{view:'poi'});
 }
@@ -1187,7 +1199,7 @@ function openGo(){
   const render=()=>{const s=q.value.trim().toLowerCase();box.replaceChildren();
     const p=myPos();
     const item=(name,sub,x,y,em)=>{const rel=p?{d:gd(p.x,p.y,x,y),dir:DIRS[dir8(brg(p.x,p.y,x,y))]}:null;return el('li',null,el('button',{type:'button',onclick:()=>previewRoute({x,y,name})},el('span',{class:'em',text:em}),el('span',null,el('b',{text:name}),sub?el('small',{text:sub}):null),el('span',{class:'r'},rel?fmtD(rel.d):'',rel?el('small',{text:rel.dir}):'')));};
-    if(!s){box.append(el('button',{class:'wide',type:'button',onclick:()=>openFindAnimals(),text:'🔍 Find animals: route through several sightings'}));const sights=visibleReports().filter(r=>r.kind==='animal').sort((a,b)=>b.lastSeen-a.lastSeen).slice(0,4);
+    if(!s){box.append(el('button',{class:'wide plan',type:'button',onclick:()=>openPlanner(),text:PLAN.stops.length?`🗺️ Trip planner · ${PLAN.stops.length} stop${PLAN.stops.length>1?'s':''} planned`:'🗺️ Plan a trip with several stops'}),el('button',{class:'wide',type:'button',onclick:()=>openFindAnimals(),text:'🔍 Find animals: route through several sightings'}));const sights=visibleReports().filter(r=>r.kind==='animal').sort((a,b)=>b.lastSeen-a.lastSeen).slice(0,4);
       if(sights.length){box.append(el('p',{class:'lbl',text:'Latest sightings'}),el('ul',{class:'list'},...sights.map(r=>{const m=merc(r.lon,r.lat);return item(label(r),`Seen ${hhmm(r.lastSeen)} · ${ago(r.lastSeen)}${r.example?' · example':''}`,m[0],m[1],emoji(r));})));}
       box.append(el('button',{class:'wide',type:'button',onclick:()=>startPick('dest'),text:'📍 Pick a spot on the map'}));}
     for(const [title,cats] of groups){let list=S.named.filter(n=>cats.includes(n.cat)).concat(S.pois.filter(n=>cats.includes(n.cat)&&!S.named.includes(n)));
@@ -2020,6 +2032,174 @@ function offerOffline(){
     setTimeout(()=>{const b=$('banner');if(b&&!b.hidden&&b.textContent.includes('without signal'))hideBanner();},20000);},7000);
 }
 
+/* =========================================================================
+   11f. Trip planner: several stops, time at each, leave-at or arrive-by,
+        and arrival ranges (animals, photo stops and tracks slow you down)
+   ========================================================================= */
+const PACES=[['direct','Direct',1,'Mostly driving'],['game','Game drive',1.4,'Slow driving and short animal stops'],['slow','Slow, many photos',1.8,'Plenty of long stops']];
+const DWELLS=[0,5,10,15,20,30,45,60,90,120];
+const RANGE_LO=0.9,RANGE_HI=1.25;               // how much faster or slower than planned a leg can turn out
+let PLAN=Object.assign({start:{kind:'me'},stops:[],end:'last',mode:'depart',time:'',day:0,pace:'game'},LS.get('plan',{}));
+const PL={r:null,err:null,tl:[],tot:null,t0:null};
+const planOn=()=>sheetView==='planner'||pickMode==='plan'||pickMode==='planstart';
+function planSave(){LS.set('plan',PLAN);}
+function plStart(){if(PLAN.start.kind==='place'){const q=merc(PLAN.start.lon,PLAN.start.lat);return {x:q[0],y:q[1],name:PLAN.start.name};}const p=myPos();return p?{x:p.x,y:p.y,name:'your position'}:null;}
+function plGates(){return S.pois.filter(p=>p.cat==='gate');}
+function plStops(){const out=PLAN.stops.map(s=>{const q=merc(s.lon,s.lat);return {...s,x:q[0],y:q[1]};});const st=plStart();
+  if(out.length&&PLAN.end==='start'&&st)out.push({id:'_end',name:PLAN.start.kind==='me'?'Back to the start':`Back to ${PLAN.start.name}`,x:st.x,y:st.y,dwell:0,fixed:true});
+  else if(out.length&&PLAN.end.startsWith('gate:')){const g=plGates().find(p=>p.name===PLAN.end.slice(5));if(g)out.push({id:'_end',name:g.short||g.name,x:g.x,y:g.y,dwell:0,fixed:true});}
+  return out;}
+function plTargetMs(){if(!PLAN.time)return null;const [h,m]=PLAN.time.split(':').map(Number);const d=new Date();d.setHours(h,m,0,0);return d.getTime()+(PLAN.day||0)*864e5;}
+function planCompute(){
+  PL.r=null;PL.err=null;PL.tl=[];PL.tot=null;
+  const from=plStart(),stops=plStops();if(!stops.length)return;if(!from){PL.err={error:'nopos'};return;}
+  const r=routeMulti(from,stops);if(r.error){PL.err=r;return;}
+  const k=(PACES.find(p=>p[0]===PLAN.pace)||PACES[1])[2];let lo=0,hi=0,mid=0;
+  r.legs.forEach((L,i)=>{const t=L.time*k,st=stops[i];lo+=t*RANGE_LO;hi+=t*RANGE_HI;mid+=t;PL.tl.push({st,len:L.len,drive:t,lo,hi,mid,dw:(st.dwell||0)*60});const dw=(st.dwell||0)*60;lo+=dw;hi+=dw;mid+=dw;});
+  const last=PL.tl[PL.tl.length-1],target=plTargetMs();
+  // arrive by: leave early enough that even the slow case is on time
+  PL.t0=PLAN.mode==='arrive'&&target?target-last.hi*1000:(PLAN.mode==='depart'&&target?target:Date.now()+60e3);
+  PL.tot={len:r.len,drive:PL.tl.reduce((a,x)=>a+x.drive,0),dwell:PL.tl.reduce((a,x)=>a+x.dw,0)-last.dw,endLo:PL.t0+last.lo*1000,endHi:PL.t0+last.hi*1000};
+  r.destName=last.st.name;r.stops=r.stops||[{...stops[0],d:r.len}];PL.r=r;
+}
+function planShow(fit){planCompute();S.route=PL.r;if(fit&&PL.r)fitRoute(PL.r);redraw();}
+function plNameAt(x,y){
+  let bj=null,bd=250;for(const j of S.juncs){const d=gd(j.x,j.y,x,y);if(d<bd){bd=d;bj=j;}}if(bj)return {name:'Junction '+bj.num,x:bj.x,y:bj.y,kind:'junction'};
+  let bp=null;bd=300;for(const p of S.pois){if(p.cat==='area'||p.cat==='lake'||p.cat==='fence')continue;const d=gd(p.x,p.y,x,y);if(d<bd){bd=d;bp=p;}}if(bp)return {name:bp.short||bp.name,x:bp.x,y:bp.y,kind:bp.cat};
+  return {name:'Spot '+whereText(x,y,true),x,y,kind:'pin'};}
+function addPlanStop(o,quiet){
+  if(PLAN.stops.length>=12){toast('A plan can have up to 12 stops.');return false;}
+  const u=unmerc(o.x,o.y);PLAN.stops.push({id:'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:String(o.name).slice(0,60),lat:+u.lat.toFixed(6),lon:+u.lon.toFixed(6),kind:o.kind||'pin',dwell:o.dwell??({lookout:20,picnic:45,camp:20,lodge:30,junction:0,pin:10,animal:15}[o.kind]??10)});
+  planSave();if(!quiet)toast(`Added to your trip plan: ${o.name} (${PLAN.stops.length} stop${PLAN.stops.length>1?'s':''})`,'Open plan',()=>openPlanner());return true;}
+function planMove(i,d){const j=i+d;if(j<0||j>=PLAN.stops.length)return;[PLAN.stops[i],PLAN.stops[j]]=[PLAN.stops[j],PLAN.stops[i]];planSave();openPlanner(true);}
+function planDel(i){PLAN.stops.splice(i,1);planSave();openPlanner(true);}
+/* best order: fixed start, fixed end if returning or leaving by a gate; exact up to 7 stops, otherwise nearest-neighbour + 2-opt */
+function planOptimize(){
+  const from=plStart(),all=plStops();if(!from||PLAN.stops.length<3){toast('Add at least three stops to change the order.');return;}
+  const free=all.filter(s=>!s.fixed),end=all.find(s=>s.fixed),pts=[from,...free,...(end?[end]:[])],n=pts.length,pp=penalties();
+  const sn=pts.map((p,i)=>snap(p.x,p.y,i?8000:15000));if(sn.some(x=>!x)){toast('Some stops are too far from a park road.');return;}
+  const T=Array.from({length:n},()=>new Array(n).fill(Infinity));
+  for(let i=0;i<n;i++)for(let j=1;j<n;j++)if(i!==j){const r=route(pts[i].x,pts[i].y,pts[j].x,pts[j].y,'',{pp,costOnly:true,s0:sn[i],s1:sn[j]});T[i][j]=r.error?Infinity:r.cost;}
+  const m=free.length,E=end?n-1:-1,cost=ord=>{let c=0,p=0;for(const q of ord){c+=T[p][q];p=q;}if(E>0)c+=T[p][E];return c;};
+  const cur=free.map((_,i)=>i+1),before=cost(cur);let best=cur.slice(),bc=before;
+  if(m<=7){const perm=(a,l)=>{if(l===a.length){const c=cost(a);if(c<bc){bc=c;best=a.slice();}return;}for(let i=l;i<a.length;i++){[a[l],a[i]]=[a[i],a[l]];perm(a,l+1);[a[l],a[i]]=[a[i],a[l]];}};perm(cur.slice(),0);}
+  else{let ord=[],left=new Set(cur),p=0;while(left.size){let b=null,bv=Infinity;for(const q of left)if(T[p][q]<bv){bv=T[p][q];b=q;}ord.push(b);left.delete(b);p=b;}
+    let imp=true;while(imp){imp=false;for(let i=0;i<ord.length-1;i++)for(let j=i+1;j<ord.length;j++){const c=ord.slice(0,i).concat(ord.slice(i,j+1).reverse(),ord.slice(j+1));if(cost(c)<cost(ord)-1){ord=c;imp=true;}}}
+    if(cost(ord)<bc){bc=cost(ord);best=ord;}}
+  const k=(PACES.find(p=>p[0]===PLAN.pace)||PACES[1])[2],saved=(before-bc)*k;
+  PLAN.stops=best.map(i=>PLAN.stops[i-1]);planSave();openPlanner(true,true);
+  toast(saved>60?`New order saves about ${fmtDur(saved)} of driving.`:'Your order was already the quickest.');
+}
+function planText(){
+  planCompute();if(!PL.r)return '';const L=[`Akagera trip plan (${fmtD(PL.tot.len)}, ${PL.tl.length} stops)`,`Leave ${hhmm(PL.t0)} ${dayWord(PL.t0)} from ${plStart().name}`];
+  PL.tl.forEach((x,i)=>L.push(`${i+1}. ${x.st.name}: ${fmtD(x.len)}, arrive ${hhmm(PL.t0+x.lo*1000)}–${hhmm(PL.t0+x.hi*1000)}${x.dw&&i<PL.tl.length-1?`, stay ${fmtDur(x.dw)}`:''}`));
+  L.push(`Finish ${hhmm(PL.tot.endLo)}–${hhmm(PL.tot.endHi)}`,appURL());return L.join('\n');}
+/* the planner sheet */
+function openPlanner(refresh,fit){
+  const keep=refresh&&sheetView==='planner'?$('sheetBody').scrollTop:0;
+  if(pickMode)endPick();
+  planShow(!refresh||fit);
+  const nodes=[],from=plStart(),now=Date.now();
+  const seg=(opts,cur,on)=>{const b=el('div',{class:'seg'},...opts.map(([v,l])=>el('button',{type:'button',class:cur===v?'on':'',onclick:()=>on(v),text:l})));b.style.gridTemplateColumns=`repeat(${opts.length},1fr)`;return b;};
+  // start
+  nodes.push(el('div',{class:'plstart'},el('span',{class:'plnum s',text:'S'}),el('div',null,el('b',{text:PLAN.start.kind==='me'?'Start: your position':`Start: ${PLAN.start.name}`}),
+      el('small',{text:from?(PLAN.start.kind==='me'?(myPos().gps?'Live GPS':'Set by hand'):'Chosen place'):'Set your position first'})),
+    el('button',{type:'button',class:'plmini',onclick:openPlanStart,text:'Change'})));
+  // stops with legs
+  if(!PLAN.stops.length)nodes.push(el('p',{class:'hint',text:'Add the places you want to visit: tap them on the map, or pick junction stones, places or sightings. Then set how long you stay at each.'}));
+  const items=[];
+  PLAN.stops.forEach((s,i)=>{const x=PL.tl[i];const dw=el('select',{class:'pldw','aria-label':'Time at this stop'},...DWELLS.map(m=>{const o=el('option',{value:String(m),text:m?`Stay ${m>=60?fmtDur(m*60):m+' min'}`:'Drive past'});if((s.dwell||0)===m)o.selected=true;return o;}));
+    dw.onchange=()=>{s.dwell=+dw.value;planSave();openPlanner(true);};
+    let risk='';if(x){const q=wxPt(PLAN.stops[i].lat);const R=q?riskText(wxRisks(q,PL.t0+x.lo*1000,PL.t0+x.hi*1000+x.dw*1000)):'';if(R)risk=`${R.icon} ${R.word.toLowerCase()}`;}
+    items.push(el('li',{class:'plstop'},el('span',{class:'plnum',text:String(i+1)}),
+      el('div',{class:'pltx'},el('b',{text:s.name}),el('small',{text:x?`${fmtD(x.len)} · ${fmtDur(x.drive)} drive · arrive ${hhmm(PL.t0+x.lo*1000)}–${hhmm(PL.t0+x.hi*1000)}${risk?' · '+risk:''}`:PL.err?'No route':'…'}),dw),
+      el('div',{class:'plbtns'},el('button',{type:'button',class:'plmini','aria-label':'Move up',disabled:i===0?'':null,onclick:()=>planMove(i,-1),text:'↑'}),el('button',{type:'button',class:'plmini','aria-label':'Move down',disabled:i===PLAN.stops.length-1?'':null,onclick:()=>planMove(i,1),text:'↓'}),el('button',{type:'button',class:'plmini no','aria-label':'Remove',onclick:()=>planDel(i),text:'✕'}))));});
+  const endTl=PL.tl.length>PLAN.stops.length?PL.tl[PL.tl.length-1]:null;
+  if(endTl)items.push(el('li',{class:'plstop end'},el('span',{class:'plnum s',text:'⚑'}),el('div',{class:'pltx'},el('b',{text:endTl.st.name}),el('small',{text:`${fmtD(endTl.len)} · ${fmtDur(endTl.drive)} drive · arrive ${hhmm(PL.t0+endTl.lo*1000)}–${hhmm(PL.t0+endTl.hi*1000)}`}))));
+  if(items.length)nodes.push(el('ol',{class:'plstops'},...items));
+  if(PL.err)nodes.push(el('div',{class:'warnrow',text:PL.err.error==='nopos'?'Set your position or choose a start place to plan the route.':`No route to ${PL.err.stop?PL.err.stop.name:'one of the stops'} on park roads. Remove it or pick a point closer to a road.`}));
+  // add stops
+  nodes.push(el('p',{class:'lbl',text:'Add stops'}),el('div',{class:'pladd'},
+    el('button',{type:'button',class:'secondary',onclick:()=>startPlanPick('plan'),text:'📍 Tap on the map'}),el('button',{type:'button',class:'secondary',onclick:()=>openPlanPick('junction'),text:'⑦ Junction stone'}),
+    el('button',{type:'button',class:'secondary',onclick:()=>openPlanPick('place'),text:'🔎 Place'}),el('button',{type:'button',class:'secondary',onclick:()=>openPlanPick('sighting'),text:'🦁 Sighting'})));
+  // end of the trip
+  const gates=plGates();
+  nodes.push(el('p',{class:'lbl',text:'End of the trip'}),seg([['last','At the last stop'],['start','Back to start'],['gate','Leave by a gate']],PLAN.end.startsWith('gate:')?'gate':PLAN.end,v=>{PLAN.end=v==='gate'?'gate:'+(gates.find(g=>/south/i.test(g.name))||gates[0]).name:v;planSave();openPlanner(true,true);}));
+  if(PLAN.end.startsWith('gate:')){const gs=el('select',{class:'search','aria-label':'Gate'},...gates.map(g=>{const o=el('option',{value:g.name,text:g.short||g.name});if(PLAN.end==='gate:'+g.name)o.selected=true;return o;}));gs.onchange=()=>{PLAN.end='gate:'+gs.value;planSave();openPlanner(true,true);};nodes.push(gs);}
+  // time
+  const tIn=el('input',{type:'time',class:'search pltime',value:PLAN.time||'','aria-label':PLAN.mode==='arrive'?'Arrive by':'Leave at'});tIn.onchange=()=>{PLAN.time=tIn.value;planSave();openPlanner(true);};
+  nodes.push(el('p',{class:'lbl',text:'Timing'}),seg([['depart','Leave at'],['arrive','Arrive by']],PLAN.mode,v=>{PLAN.mode=v;if(v==='arrive'&&!PLAN.time)PLAN.time='17:30';planSave();openPlanner(true);}),
+    el('div',{class:'pltimes'},tIn,seg([[0,'Today'],[1,'Tomorrow']],PLAN.day||0,v=>{PLAN.day=v;planSave();openPlanner(true);}),
+      PLAN.mode==='depart'?el('button',{type:'button',class:'plmini wide',onclick:()=>{PLAN.time='';PLAN.day=0;planSave();openPlanner(true);},text:'Now'}):null),
+    el('p',{class:'lbl',text:'Pace'}),seg(PACES.map(p=>[p[0],p[1]]),PLAN.pace,v=>{PLAN.pace=v;planSave();openPlanner(true);}),
+    el('p',{class:'fine',text:(PACES.find(p=>p[0]===PLAN.pace)||PACES[1])[3]+'. Times are shown as a range, because animals on the road, photo stops and track conditions can slow you down.'}));
+  // summary
+  if(PL.r&&PL.tot){const T=PL.tot,late=PLAN.mode==='arrive'&&plTargetMs()&&PL.t0<now;
+    nodes.push(el('div',{class:'plsum'},el('div',{class:'big',text:`${fmtD(T.len)} · ${fmtDur(T.drive)} driving`}),
+      el('div',{text:`${T.dwell?`Plus ${fmtDur(T.dwell)} at stops · `:''}${PL.tl.length} stop${PL.tl.length>1?'s':''}`}),
+      el('div',{class:'when',text:PLAN.mode==='arrive'&&plTargetMs()?(late?`Too late to arrive by ${PLAN.time}. Leaving now you would arrive ${hhmm(now+(T.endLo-PL.t0))}–${hhmm(now+(T.endHi-PL.t0))}.`:`Leave by ${hhmm(PL.t0)} ${dayWord(PL.t0)} to arrive by ${PLAN.time}. Likely arrival ${hhmm(T.endLo)}–${hhmm(T.endHi)}.`)
+        :`Leave ${PLAN.time?hhmm(PL.t0)+' '+dayWord(PL.t0):'now'} · finish ${hhmm(T.endLo)}–${hhmm(T.endHi)}`})));
+    // notes: opening hours, sunset, weather, closed tracks
+    const q=wxPt(unmerc(PL.r.pts[0][0],PL.r.pts[0][1]).lat),d=q&&dayAt(q,T.endHi);
+    if(rwHour(PL.t0)<6)nodes.push(el('div',{class:'warnrow',style:'background:#F3E6F7;color:#4A2660',text:`🌅 You would leave at ${hhmm(PL.t0)}, before the park opens at 06:00 for day visitors.`}));
+    if(d&&d.set&&T.endHi>d.set&&T.endLo<d.set+6*3600e3)nodes.push(el('div',{class:'warnrow',style:'background:#F3E6F7;color:#4A2660',text:`🌇 You may finish after sunset (${hhmm(d.set)}). The park is open 06:00–18:00 for day visitors.`}));
+    else if(rwHour(T.endHi)>=18||rwHour(T.endHi)<rwHour(PL.t0))nodes.push(el('div',{class:'warnrow',style:'background:#F3E6F7;color:#4A2660',text:`🌇 You may finish after 18:00, when the park closes for day visitors.`}));
+    const wr=[];PL.tl.forEach(x=>{const pt=wxPt(unmerc(x.st.x,x.st.y).lat);const R=pt&&riskText(wxRisks(pt,PL.t0+x.lo*1000,PL.t0+x.hi*1000+x.dw*1000));if(R)wr.push(R);});
+    if(wr.length){const R=wr.find(r=>r.kind==='storm')||wr[0];nodes.push(el('div',{class:'warnrow'+(R.kind==='storm'?' storm':''),style:R.kind==='storm'?'':'background:#DCEAF8;color:#1D4F86',text:`${R.icon} ${R.word} during the trip (${R.span}). ${R.kind==='storm'?lightningAdvice():'Tracks get slippery fast; the route keeps to main roads where it can.'}`}));}
+    if(PL.r.offLen>50)nodes.push(el('div',{class:'warnrow',style:'background:#FFF1D6;color:#6A4300',text:`ⓘ ${fmtD(PL.r.offLen)} on ${PL.r.offNames.join(', ')||'tracks'} that OpenStreetMap marks closed. Ask at reception.`}));
+    if(PL.r.sights&&PL.r.sights.length)nodes.push(el('div',{class:'warnrow',style:'background:#E4F2E8;color:#1E4D2E',text:`🦁 Near your route: ${[...new Set(PL.r.sights.slice(0,5).map(x=>label(x)))].join(', ')}.`}));
+    nodes.push(el('div',{class:'acts'},el('button',{class:'secondary',type:'button',onclick:startPreview,text:'▶ Preview'}),el('button',{class:'primary green',type:'button',onclick:()=>{S.route=PL.r;startNav();},text:'Start'})));
+  }
+  // order, save, share
+  const tools=[];
+  if(PLAN.stops.length>=3)tools.push(el('button',{class:'secondary',type:'button',onclick:planOptimize,text:'🔀 Quickest order'}));
+  if(PLAN.stops.length){tools.push(el('button',{class:'secondary',type:'button',onclick:openPlanSave,text:'💾 Save plan'}),el('button',{class:'secondary',type:'button',onclick:()=>shareOrCopy({title:'Akagera trip plan',text:planText()}),text:'📤 Share'}),
+    el('button',{class:'secondary no',type:'button',onclick:()=>{PLAN.stops=[];planSave();openPlanner(true);},text:'Clear stops'}));}
+  if(tools.length)nodes.push(el('div',{class:'pltools'},...tools));
+  const saved=LS.get('plans',[]);
+  if(saved.length)nodes.push(el('p',{class:'lbl',text:'My saved plans'}),el('ul',{class:'list'},...saved.map((s,i)=>el('li',null,el('button',{type:'button',onclick:()=>{PLAN=Object.assign({},PLAN,JSON.parse(JSON.stringify(s.plan)));planSave();openPlanner(false,true);toast(`Loaded "${s.name}".`);}},
+    el('span',{class:'em',text:'🗺️'}),el('span',null,el('b',{text:s.name}),el('small',{text:`${s.plan.stops.length} stops · saved ${stamp(s.at)}`})),el('span',{class:'r',text:'Load'}))))));
+  openSheet('Trip planner',nodes,{view:'planner',tall:true});if(keep)$('sheetBody').scrollTop=keep;
+}
+function openPlanSave(){
+  const nm=el('input',{class:'search',maxlength:'40',value:`Trip ${new Date().toLocaleDateString([], {day:'numeric',month:'short'})}`});
+  const saved=LS.get('plans',[]);
+  openSheet('Save this plan',[el('p',{class:'lbl',text:'Name'}),nm,el('button',{class:'primary green',type:'button',onclick:()=>{const name=nm.value.trim()||'My trip';const list=LS.get('plans',[]).filter(p=>p.name!==name);list.unshift({name,at:Date.now(),plan:JSON.parse(JSON.stringify(PLAN))});LS.set('plans',list.slice(0,20));toast(`Saved "${name}". It works offline too.`);openPlanner(true);},text:'Save'}),
+    saved.length?el('p',{class:'lbl',text:'Saved plans'}):null,saved.length?el('ul',{class:'list'},...saved.map(s=>el('li',null,el('button',{type:'button',onclick:()=>{LS.set('plans',LS.get('plans',[]).filter(p=>p.name!==s.name));openPlanSave();}},el('span',{class:'em',text:'🗑️'}),el('span',null,el('b',{text:s.name}),el('small',{text:`${s.plan.stops.length} stops · tap to delete`})))))):null,
+    el('button',{class:'secondary',type:'button',onclick:()=>openPlanner(true),text:'Back to the plan'})],{view:'plansave'});
+}
+/* choose stops from lists */
+function openPlanPick(kind,forStart){
+  const box=el('div',{class:'stack'}),q=el('input',{class:'search',type:'search',placeholder:kind==='junction'?'Junction number':'Search places'});const p=myPos();
+  const pick=(o)=>{if(forStart){const u=unmerc(o.x,o.y);PLAN.start={kind:'place',name:o.name,lat:+u.lat.toFixed(6),lon:+u.lon.toFixed(6)};planSave();openPlanner(false,true);return;}if(addPlanStop(o,true))toast(`Added ${o.name}.`);openPlanner(true,true);};
+  const render=()=>{const s=q.value.trim().toLowerCase();box.replaceChildren();
+    if(kind==='junction'){box.append(el('div',{class:'grid3',style:'grid-template-columns:repeat(auto-fill,minmax(60px,1fr))'},...S.juncs.filter(j=>!s||String(j.num).startsWith(s)).map(j=>el('button',{type:'button',style:'min-height:56px;font-size:18px',onclick:()=>pick({name:'Junction '+j.num,x:j.x,y:j.y,kind:'junction'}),text:String(j.num)}))));return;}
+    if(kind==='sighting'){const rs=visibleReports().filter(r=>r.kind==='animal').sort((a,b)=>b.lastSeen-a.lastSeen);
+      if(!rs.length){box.append(el('p',{class:'hint',text:'No recent sightings. Pick a place instead.'}));return;}
+      box.append(el('ul',{class:'list'},...rs.slice(0,25).filter(r=>!s||label(r).toLowerCase().includes(s)).map(r=>{const m=merc(r.lon,r.lat);return el('li',null,el('button',{type:'button',onclick:()=>pick({name:`${label(r)} (seen ${hhmm(r.lastSeen)})`,x:m[0],y:m[1],kind:'animal'})},pic(r.type,40),el('span',null,el('b',{text:label(r)}),el('small',{text:`Seen ${hhmm(r.lastSeen)} · ${ago(r.lastSeen)} · ${whereText(m[0],m[1],true)}`}))));})));return;}
+    let list=S.named.concat(S.pois.filter(n=>['gate','reception','hq','lodge','camp','lookout','picnic','ranger','ruins'].includes(n.cat)&&!S.named.includes(n)));
+    list=[...new Map(list.map(n=>[(n.short||n.name),n])).values()].filter(n=>inRing(n.x,n.y,S.park)||outsideBy(n)<400);
+    if(s)list=list.filter(n=>(n.name+' '+(n.short||'')).toLowerCase().includes(s));if(p)list.sort((a,b)=>gd(p.x,p.y,a.x,a.y)-gd(p.x,p.y,b.x,b.y));
+    box.append(el('ul',{class:'list'},...list.slice(0,30).map(n=>el('li',null,el('button',{type:'button',onclick:()=>pick({name:n.short||n.name,x:n.x,y:n.y,kind:n.cat})},el('span',{class:'em',text:{gate:'🚪',reception:'ℹ️',hq:'🏠',lodge:'🛏️',camp:'⛺',lake:'💧',lookout:'👁️',picnic:'🧺',area:'🌾',ranger:'🛡️',ruins:'🏚️',hill:'⛰️'}[n.cat]||'📍'}),el('span',null,el('b',{text:n.short||n.name}),el('small',{text:p?fmtD(gd(p.x,p.y,n.x,n.y))+' away':''})))))));};
+  q.oninput=render;render();
+  openSheet(forStart?'Start from':kind==='junction'?'Add a junction stone':kind==='sighting'?'Add a sighting':'Add a place',[q,box,el('button',{class:'secondary',type:'button',onclick:()=>openPlanner(true),text:'Back to the plan'})],{view:'planpick'});
+}
+function openPlanStart(){
+  openSheet('Start from',[el('button',{class:'primary blue',type:'button',onclick:()=>{PLAN.start={kind:'me'};planSave();openPlanner(false,true);},text:'📍 My position'}),
+    el('button',{class:'secondary',type:'button',onclick:()=>openPlanPick('place',true),text:'🔎 A place (lodge, gate, camp)'}),
+    el('button',{class:'secondary',type:'button',onclick:()=>startPlanPick('planstart'),text:'👆 Tap the map'}),
+    el('button',{class:'secondary',type:'button',onclick:()=>openPlanner(true),text:'Back to the plan'})],{view:'planstart'});
+}
+/* tap-to-add mode: the sheet steps aside, every tap adds a stop */
+function startPlanPick(kind){
+  pickMode=kind;$('sheet').hidden=true;planShow(false);
+  let bar=$('planBar');if(!bar){bar=el('div',{id:'planBar',class:'banner planbar'});$('banner').after(bar);}
+  const upd=()=>{bar.replaceChildren(el('p',{text:kind==='planstart'?'Tap the map where the trip starts.':`Tap places, junction stones or sightings to add them. ${PLAN.stops.length} stop${PLAN.stops.length===1?'':'s'} so far.`}),
+    kind==='plan'&&PLAN.stops.length?el('button',{type:'button',class:'ghost',onclick:()=>{PLAN.stops.pop();planSave();planShow(false);upd();},text:'Undo'}):null,
+    el('button',{type:'button',onclick:()=>{endPick();openPlanner(true,true);},text:'Done'}));bar.hidden=false;};
+  PL.updBar=upd;upd();
+}
+
 function saveSet(){LS.set('settings',S.set);}
 /* ---------- map layers ---------- */
 const LAYERS=[
@@ -2193,6 +2373,6 @@ async function boot(){
   setInterval(()=>{if(!S.nav&&S.follow){const p=myPos();if(p&&p.gps){cam.cx=p.x;cam.cy=p.y;redraw();}}},1000);
   if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))navigator.serviceWorker.register('sw.js').catch(()=>{});
   if(!S.set.hideEx&&allReports().some(r=>r.example))banner('No live reports yet. Pins marked EXAMPLE are samples.','Hide',()=>{S.set.hideEx=true;saveSet();hideBanner();redraw();},'ex');
-  window.AKL=S;window.AKLf={openOffline,downloadOffline,setOfflineMode,openWeather,loadWeather,wxHere,openParkMap,drawOfficial,paintVehicle,paintAvatar,carSet,openMyCar,saveCar,lbPublish,myStats,lbSorted,LB,previewRoute,centerOn,route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
+  window.AKL=S;window.AKLf={openPlanner,addPlanStop,planOptimize,getPlan:()=>PLAN,PL,openOffline,downloadOffline,setOfflineMode,openWeather,loadWeather,wxHere,openParkMap,drawOfficial,paintVehicle,paintAvatar,carSet,openMyCar,saveCar,lbPublish,myStats,lbSorted,LB,previewRoute,centerOn,route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
 }
 boot();
