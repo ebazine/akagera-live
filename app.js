@@ -1,4 +1,4 @@
-/* Akagera Live: sightings, road conditions and GPS navigation for Akagera National Park.
+/* Reba: sightings, road conditions and GPS navigation for Akagera National Park.
    Map data: OpenStreetMap contributors (ODbL) and the park entrance board. Weather: Open-Meteo. */
 "use strict";
 
@@ -1361,7 +1361,7 @@ function navUpdate(){
   const wb=$('navWarn');if(w){wb.hidden=false;wb.textContent=`${RD[w.r.type][2]} ${RD[w.r.type][1]} in ${fmtD(w.ahead)}`;if(!N.spoken['w'+w.r.id]&&w.ahead<600){N.spoken['w'+w.r.id]=1;say(`Caution. ${RD[w.r.type][1]} reported ahead.`);}}else wb.hidden=true;
   // voice prompts
   const key=R.instr.indexOf(next);
-  if(next.type==='arrive'){if(dist<30&&!N.spoken.arr){N.spoken.arr=1;say(`You have arrived at ${R.destName}.`);setTimeout(()=>{endNav(true);toast(`Arrived at ${R.destName}.`);},4000);}}
+  if(next.type==='arrive'){if(dist<30&&!N.spoken.arr){N.spoken.arr=1;say(`You have arrived at ${R.destName}.`);setTimeout(()=>{endNav(true);toast(`Arrived at ${R.destName}. Gerayo amahoro! 🌿`,null,null,6000);},4000);}}
   else if(next.type!=='waypoint'){const t=instrText(next);
     if(dist<600&&dist>250&&!N.spoken[key+'f']){N.spoken[key+'f']=1;say(`In ${fmtD(Math.round(dist/50)*50)}, ${t.toLowerCase()}.`);}
     if(dist<=90&&!N.spoken[key+'n']){N.spoken[key+'n']=1;say(t+'.');}}
@@ -1990,8 +1990,8 @@ async function shareOrCopy(data){
 function shareInvite(code){if(code)return openInvite(code);return shareInviteOld(null);}
 function shareInviteOld(code){
   const url=code?`${appURL()}?join=${code}`:`${appURL()}?board=1`;
-  const text=code?`Join my Akagera Live leaderboard "${groupName(code)}" 🏆 Open the link, or enter code ${code} under Animals → Board.`:`Join the Akagera Live leaderboard 🏆 Spot, report and verify animals in Akagera National Park and climb the board.`;
-  shareOrCopy({title:'Akagera Live leaderboard',text,url});
+  const text=code?`Join my Reba leaderboard "${groupName(code)}" 🏆 Open the link, or enter code ${code} under Animals → Board.`:`Join the Reba leaderboard 🏆 Spot, report and verify animals in Akagera National Park and climb the board.`;
+  shareOrCopy({title:'Reba leaderboard',text,url});
 }
 /* score card image, shared as a picture */
 function drawScoreCard(){
@@ -2005,7 +2005,7 @@ function drawScoreCard(){
   // shrink the font until the line fits the card
   const T=(t,x,y,font,col,al='center')=>{let f=font.replace(/Barlow,sans-serif|Barlow,.*$/,TX);g.font=f;let px=+(/(\d+)px/.exec(f)||[0,40])[1];
     while(g.measureText(t).width>980&&px>18){px-=2;f=f.replace(/\d+px/,px+'px');g.font=f;}g.fillStyle=col;g.textAlign=al;g.textBaseline='alphabetic';g.fillText(t,x,y);};
-  T('AKAGERA LIVE',540,110,'700 44px Barlow,sans-serif','#F7C75A');T('Safari leaderboard',540,160,'500 34px Barlow,sans-serif','rgba(255,255,255,.75)');
+  T('REBA',540,110,'700 52px Barlow,sans-serif','#F7C75A');T('Akagera safari leaderboard',540,160,'500 34px Barlow,sans-serif','rgba(255,255,255,.75)');
   T(me.emoji,540,330,`150px ${EM}`,'#fff');T(me.name,540,430,'800 72px Barlow,sans-serif','#fff');T(sc.lv[1].toUpperCase(),540,490,'700 38px Barlow,sans-serif','#9FD3A9');
   T(String(st.pts),540,660,'800 190px Barlow,sans-serif','#F7C75A');T('points',540,720,'600 44px Barlow,sans-serif','rgba(255,255,255,.85)');
   const lines=[];if(park&&park.week)lines.push(`#${park.rank} this week on the park board`);if(grp&&grp.week)lines.push(`#${grp.rank} this week in ${groupName(LB.scope)}`);
@@ -2020,13 +2020,13 @@ function drawScoreCard(){
 }
 function openScoreCard(){
   const c=drawScoreCard();const img=el('img',{class:'scoreimg',alt:'Your score card',src:c.toDataURL('image/png')});
-  let file=null;c.toBlob(b=>{if(b)file=new File([b],'akagera-score.png',{type:'image/png'});},'image/png');
+  let file=null;c.toBlob(b=>{if(b)file=new File([b],'reba-score.png',{type:'image/png'});},'image/png');
   const st=myStats(),park=LB.joined?lbSorted('park','week').find(r=>r.me):null;
-  const text=`🦁 ${st.pts} points on Akagera Live${park&&park.week?`, #${park.rank} on the park board this week`:''}. ${st.n} animals ticked, ${st.ver} sightings verified. Can you beat me?`;
+  const text=`🦁 ${st.pts} points on Reba${park&&park.week?`, #${park.rank} on the park board this week`:''}. ${st.n} animals ticked, ${st.ver} sightings verified. Can you beat me?`;
   const url=LB.scope!=='park'?`${appURL()}?join=${LB.scope}`:`${appURL()}?board=1`;
   openSheet('Share my score',[img,
-    el('button',{class:'primary green',type:'button',onclick:async()=>{try{if(file&&navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],text:text+' '+url,title:'Akagera Live'});return;}}catch(e){if(e&&e.name==='AbortError')return;}shareOrCopy({title:'Akagera Live',text,url});},text:'📣 Share picture'}),
-    el('button',{class:'secondary',type:'button',onclick:()=>shareOrCopy({title:'Akagera Live',text,url}),text:'Share as text'}),
+    el('button',{class:'primary green',type:'button',onclick:async()=>{try{if(file&&navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],text:text+' '+url,title:'Reba · Akagera'});return;}}catch(e){if(e&&e.name==='AbortError')return;}shareOrCopy({title:'Reba · Akagera',text,url});},text:'📣 Share picture'}),
+    el('button',{class:'secondary',type:'button',onclick:()=>shareOrCopy({title:'Reba · Akagera',text,url}),text:'Share as text'}),
     el('a',{class:'secondary',href:img.src,download:'akagera-score.png',text:'Save picture'}),
     el('button',{class:'secondary',type:'button',onclick:()=>openBoard(),text:'Back to the board'})],{view:'scorecard'});
 }
@@ -2090,7 +2090,7 @@ async function downloadOffline(){
   const say_=t=>{const p=$('offProg');if(p)p.textContent=t;};
   try{if(navigator.storage&&navigator.storage.persist)await navigator.storage.persist();}catch(e){}
   say_('Getting ready…');
-  const core=['./','index.html','app.css','app.js','config.js','species.js','emergency.js','manifest.webmanifest','data/board.json','data/osm.json','data/official.json','icons/icon-192.png','icons/icon-512.png','lib/qrcode.js'];
+  const core=['./','index.html','app.css','app.js','config.js','species.js','emergency.js','manifest.webmanifest','data/board.json','data/osm.json','data/official.json','icons/icon-192.png','icons/icon-512.png','icons/apple-touch-icon.png','icons/favicon.svg','lib/qrcode.js'];
   const off=[];try{const j=await getJSON('data/official/index.json');off.push('data/official/park-map-2020.webp');for(const z in j.tiles)for(const [x,y] of j.tiles[z])off.push(`data/official/${z}/${x}/${y}.webp`);}catch(e){}
   say_('Finding animal photos…');await loadPhotos();
   const jobs=[...core.map(u=>[u,{cache:'no-cache'}]),...off.map(u=>[u,{}]),...Object.values(PH.url).map(u=>[u,{mode:'no-cors'}])];
@@ -2408,7 +2408,7 @@ function inviteURL(code){return `${appURL()}?join=${code}`;}
 function openInvite(code,fresh){
   const url=inviteURL(code),name=grName(code);const qr=el('div',{class:'qrbox','aria-label':'QR code with the invite link'});
   loadQR().then(()=>{const q=window.qrcode(0,'M');q.addData(url);q.make();qr.innerHTML=q.createSvgTag({cellSize:5,margin:2,scalable:true});}).catch(()=>{qr.hidden=true;});
-  const text=`Join my group "${name}" in Akagera Live 🦒 for our group chat, sightings and leaderboard. Open the link, or enter the code ${fmtCode(code)} under Chat → Groups.`;
+  const text=`Join my group "${name}" in Reba 🦒 for our group chat, sightings and leaderboard. Open the link, or enter the code ${fmtCode(code)} under Chat → Groups.`;
   openSheet(fresh?`${name} is ready`:`Invite to ${name}`,[
     fresh?el('p',{class:'hint',text:'Now invite people. Anyone with the link, code or QR code can join.'}):null,
     el('button',{class:'primary green',type:'button',onclick:()=>shareOrCopy({title:`Join ${name}`,text,url}),text:'📤 Send the invite (WhatsApp, SMS…)'}),
@@ -2636,7 +2636,7 @@ function checkNear(force){
   const {r,d,q}=best,where=relWord(g,q[0],q[1]),nv=verList(r).length;
   const c=$('nearCard');if(!$('sheet').hidden){c.hidden=true;return;}   // back when the sheet closes
   c.replaceChildren(el('button',{type:'button',class:'nc-main',onclick:()=>openReportView(r)},pic(r.type,48),
-      el('span',null,el('b',{text:`${label(r)} ${fmtD(d)} ${where}`}),el('small',{text:`Seen ${ago(r.lastSeen)}${nv?` · ✅ ${nv} verified`:' · not verified yet'}${r.example?' · example':''}`}))),
+      el('span',null,el('b',{text:`${label(r)} ${fmtD(d)} ${where}`}),el('small',{text:`Reba! Seen ${ago(r.lastSeen)}${nv?` · ✅ ${nv} verified`:' · not verified yet'}${r.example?' · example':''}`}))),
     el('div',{class:'nc-acts'},el('button',{type:'button',class:'ok',onclick:()=>verifySighting(r),text:'✅ I see it'}),el('button',{type:'button',class:'no',onclick:()=>goneHere(r),text:'Not here'}),el('button',{type:'button',class:'x','aria-label':'Dismiss',onclick:()=>nearDone(r.id),text:'×'})));
   const host=c.parentElement.getBoundingClientRect();
   if(S.nav){   // while driving: under the turn instruction, so the car and the road ahead stay visible
@@ -2656,7 +2656,8 @@ function openSettings(){
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();if(S.sim){stopSim();toast('Demo drive stopped.');}else{if(!S.route){toast('Pick a destination with Go first.');return;}startNav();startSim();}},text:S.sim?'Stop demo drive':'Demo drive along the planned route'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();startPick('me');},text:'Set my position by hand'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{S.set.hideEx=!S.set.hideEx;saveSet();closeSheet();redraw();},text:S.set.hideEx?'Show example reports':'Hide example reports'}),
-    el('p',{class:'lbl',text:'Support the app'}),el('p',{class:'fine',text:'Akagera Live is free. If it helped your game drive, you can say thanks with a coffee.'}),coffeeLink(),
+    el('p',{class:'lbl',text:'Support the app'}),el('p',{class:'fine',text:'Reba is free. If it helped your game drive, you can say thanks with a coffee.'}),coffeeLink(),
+    el('p',{class:'lbl',text:'About Reba'}),el('p',{class:'fine',text:'Reba is an unofficial community guide to Akagera National Park, made by a visitor. It is not run by or affiliated with African Parks or the Rwanda Development Board. Follow the park rules and the guidance of rangers.'}),
     el('p',{class:'lbl',text:'About the data'}),
     el('p',{class:'fine',text:`Sharing: ${cfg&&cfg.apiKey?'Firebase project '+cfg.projectId+' ('+S.sync+')':'not set up yet, so reports stay on this phone.'}`}),
     el('p',{class:'fine',text:S.layers.osm?`Roads and lakes: OpenStreetMap contributors, updated ${S.osm.meta.generated}.`:'Roads: traced from the park entrance board (detailed OpenStreetMap roads not loaded yet).'}),

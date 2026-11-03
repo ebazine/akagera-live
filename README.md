@@ -1,4 +1,6 @@
-# Akagera Live
+# Reba · Akagera
+
+*Reba* means "look!" in Kinyarwanda. An unofficial community guide to Akagera National Park (not run by or affiliated with African Parks or the Rwanda Development Board).
 
 Live animal sightings, road conditions and GPS turn-by-turn navigation for Akagera National Park, Rwanda.
 Open it on a phone at **https://ebazine.github.io/akagera-live/** and use *Add to Home screen* so it works like an app.
@@ -24,7 +26,7 @@ Open it on a phone at **https://ebazine.github.io/akagera-live/** and use *Add t
 - **Map layers.** The layers button on the right shows or hides sightings, road reports, junction stones, lodges and camps, gates and ranger posts, names, closed tracks, rivers and wetlands, and example reports, with *Clean*, *Animals only* and *Everything* presets.
 - **Routes avoid trouble.** Impassable reports block the road for routing, 4x4-only and caution reports weigh it down, and after heavy rain the router prefers main roads over tracks.
 - **Animal guide.** 34 animals of Akagera with photos, where to find them, and what to do next to your car: warning signs, do's and never's, plus 10 rules for driving among animals.
-- **Score sheet.** Every animal you report is ticked off. Points by rarity, badges (Big Five, Rhino double, Lake life, Antelope ace and more) and levels from Rookie to Akagera Legend.
+- **Score sheet.** Every animal you report is ticked off. Points by rarity, badges (Big Five, Rhino double, Lake life, Antelope ace and more) and levels from Newcomer to Head Ranger.
 - **Works offline.** The app, map data and your reports are cached on the phone. Reports queue and send when you are back in coverage.
 
 ## Data

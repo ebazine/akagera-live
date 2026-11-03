@@ -3,8 +3,8 @@
    - Own files: network first, but after 3 s of weak signal the saved copy is used.
    - Map tiles, the official park map and animal photos: saved copy first.
    - Offline mode (switched on in the app): nothing goes to the network. */
-const VERSION = 'akl-v3.2.1';
-const CORE = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'species.js', 'emergency.js', 'manifest.webmanifest', 'data/board.json', 'data/osm.json', 'data/official.json', 'icons/icon-192.png', 'icons/icon-512.png', 'lib/qrcode.js'];
+const VERSION = 'akl-v3.3.0';
+const CORE = ['./', 'index.html', 'app.css', 'app.js', 'config.js', 'species.js', 'emergency.js', 'manifest.webmanifest', 'data/board.json', 'data/osm.json', 'data/official.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/favicon.svg', 'lib/qrcode.js'];
 const FLAG = new URL('__akl_offline', self.registration.scope).href;
 const WAIT_MS = 3000;
 

@@ -222,7 +222,7 @@ window.BADGES = [
  {id:'night',name:'Night shift',icon:'🌙',need:[['hyena'],['serval','jackal','leopard']],bonus:30,text:'Hyena plus a serval, jackal or leopard'},
  {id:'rare',name:'Rare finds',icon:'💎',need:[['roan','sitatunga','klipspringer','gonolek']],bonus:30,text:'Roan, sitatunga, klipspringer or papyrus gonolek'}
 ];
-window.LEVELS = [[0,'Rookie'],[60,'Spotter'],[160,'Tracker'],[320,'Ranger'],[520,'Akagera Legend']];
+window.LEVELS = [[0,'Newcomer'],[60,'Spotter'],[160,'Tracker'],[320,'Ranger'],[520,'Head Ranger']];
 
 window.PARK_RULES = [
  'Stay inside your vehicle except at lodges, campsites, picnic spots and Hippo Beach.',

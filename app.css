@@ -452,3 +452,17 @@ a.secondary{display:flex;align-items:center;justify-content:center;text-decorati
 .coffee{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 16px;border-radius:14px;background:#FFDD00;color:#1b1b1b;font-weight:700;text-decoration:none;border:1px solid rgba(0,0,0,.12)}
 .coffee.small{min-height:40px;font-size:14px}
 .coffee:active{filter:brightness(.95)}
+
+/* ---- Reba brand ---- */
+:root{--laterite:#E35F14;--savanna:#F2B544;--lake:#2369B0;--paper:#F6F2E7}
+.brand{gap:9px}.brand .bn{display:flex;flex-direction:column;line-height:1;min-width:0}
+.brand .bn b{font-size:25px;letter-spacing:.015em}
+.brand .bn small{font-family:var(--f-display);font-weight:600;font-size:11.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--savanna);margin-top:2px}
+#splash{position:fixed;inset:0;z-index:99999;background:linear-gradient(160deg,#24452C,#14301C);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:#fff;animation:splashOut .5s ease 1.5s forwards}
+#splash svg{margin-bottom:6px;animation:splashPop .6s ease both}
+#splash b{font-family:var(--f-display);font-size:64px;line-height:1;letter-spacing:.02em}
+#splash span{font-family:var(--f-display);font-size:22px;letter-spacing:.14em;text-transform:uppercase;color:var(--savanna);margin-top:6px}
+#splash small{font-size:14px;color:rgba(255,255,255,.7);margin-top:2px}
+@keyframes splashOut{to{opacity:0;visibility:hidden}}
+@keyframes splashPop{from{transform:translateY(10px) scale(.9);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){#splash,#splash svg{animation-duration:.01s}#splash{animation-delay:.9s}}

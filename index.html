@@ -6,23 +6,36 @@
 <meta name="theme-color" content="#1E3A24">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="description" content="Live animal sightings, road conditions and GPS navigation for Akagera National Park, Rwanda.">
-<title>Akagera Live</title>
+<meta name="description" content="Reba: live animal sightings, road conditions, trip planning and GPS navigation for Akagera National Park, Rwanda. Unofficial community guide.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Reba">
+<meta property="og:title" content="Reba · Akagera game drive companion">
+<meta property="og:description" content="Live animal sightings, road conditions and trip planning, shared by drivers in the park.">
+<meta property="og:url" content="https://ebazine.github.io/akagera-live/">
+<meta property="og:image" content="https://ebazine.github.io/akagera-live/icons/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="apple-mobile-web-app-title" content="Reba">
+<title>Reba · Akagera</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icons/icon-192.png">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
+<div id="splash" aria-hidden="true"><svg class="mk" width="96" height="105" viewBox="96 80 320 350" aria-hidden="true"><path d="M256 424C256 424 128 306 128 218a128 128 0 1 1 256 0c0 88-128 206-128 206z" fill="#E35F14"/><path fill="#FFF6E0" d="M152 192c-4-14 10-26 30-28 10-12 30-16 46-10 12-10 38-12 52-2 16-6 40-2 50 12 20 2 32 14 28 28-26-8-60-12-100-12-44 0-82 4-106 12z"/><g fill="none" stroke="#FFF6E0" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"><path d="M256 322c0-28-2-52-8-74"/><path d="M248 248c-10-18-26-34-48-52"/><path d="M250 262c12-20 34-40 68-62"/></g><path d="M214 324c16-6 60-6 84 0-14 6-70 6-84 0z" fill="#FFF6E0"/></svg><b>Reba</b><span>Murakaza neza</span><small>Akagera game drive companion</small></div>
+<script>try{if(sessionStorage.getItem("rebaSplash"))document.getElementById("splash").remove();else sessionStorage.setItem("rebaSplash","1");}catch(e){}</script>
 <div id="app">
   <!-- ===== browse header ===== -->
   <header class="top" id="top">
     <div class="brand">
-      <svg width="32" height="32" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="16" fill="#E35F14"/><path d="M17 6l3.2 9.2L17 28l-3.2-12.8z" fill="#fff"/><circle cx="17" cy="17" r="2.4" fill="#1E3A24"/></svg>
-      <b>Akagera Live</b>
+      <svg class="mk" width="28" height="31" viewBox="96 80 320 350" aria-hidden="true"><path d="M256 424C256 424 128 306 128 218a128 128 0 1 1 256 0c0 88-128 206-128 206z" fill="#E35F14"/><path fill="#FFF6E0" d="M152 192c-4-14 10-26 30-28 10-12 30-16 46-10 12-10 38-12 52-2 16-6 40-2 50 12 20 2 32 14 28 28-26-8-60-12-100-12-44 0-82 4-106 12z"/><g fill="none" stroke="#FFF6E0" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"><path d="M256 322c0-28-2-52-8-74"/><path d="M248 248c-10-18-26-34-48-52"/><path d="M250 262c12-20 34-40 68-62"/></g><path d="M214 324c16-6 60-6 84 0-14 6-70 6-84 0z" fill="#FFF6E0"/></svg>
+      <div class="bn"><b>Reba</b><small>Akagera</small></div>
     </div>
     <div class="stat">
       <button class="pill" id="wxPill" type="button" aria-label="Weather and road outlook"><span class="wxi" aria-hidden="true">☁</span><span id="wxText">…</span></button>

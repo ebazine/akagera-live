@@ -1,7 +1,7 @@
 {
-  "name": "Akagera Live",
-  "short_name": "Akagera",
-  "description": "Animal sightings, road conditions and GPS navigation for Akagera National Park.",
+  "name": "Reba · Akagera",
+  "short_name": "Reba",
+  "description": "Reba: animal sightings, road conditions, trip planning and GPS navigation for Akagera National Park. Unofficial community guide.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
