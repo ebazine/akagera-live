@@ -5,17 +5,18 @@ Open it on a phone at **https://ebazine.github.io/akagera-live/** and use *Add t
 
 ## What it does
 
-- **GPS navigation on the park's tracks.** Pick a lodge, lake, gate, junction stone or a sighting and the app plans a route on the OpenStreetMap road network, using roads inside the park only, then guides you with a heading-up 3D view, turn arrows, distances, spoken directions and automatic rerouting.
+- **GPS navigation on the park's tracks.** Pick a lodge, lake, gate, junction stone or a sighting and the app plans a route on the OpenStreetMap road network, using roads inside the park only, then guides you with a heading-up 3D view (your vehicle is drawn in 3D, upright on the tilted map), turn arrows, distances, spoken directions and automatic rerouting.
 - **Route preview.** Step through every turn on the map before you drive, or press play for a guided fly-through.
-- **Find animals.** Tick the animals you want to see; the app takes the freshest sighting of each and plans the quickest route through all of them, with arrival times.
+- **Find animals.** Tick the animals you want to see; they are added to your trip as animal stops, which always use the freshest sighting of each species (and update when someone reports a newer one). Mix them freely with lodges, lakes and junction stones.
 - **Speed warning.** Above 40 km/h inside the park the speed badge turns red, you get a spoken reminder (can be switched off in Settings).
 - **Report in three or four taps.** Animals: species, how many, which way they are moving (relative to your car). Road problems: type and severity. Your GPS position is used automatically.
 - **Timestamps everywhere.** Every sighting shows the clock time it was seen and how long ago. *Animals* lists the latest sightings and the last time each species was seen (up to 7 days).
 - **Road reports expire with the weather.** Mud, flooding and slippery climbs last a base time plus extra hours per millimetre of rain (Open-Meteo data for the north, centre and south of the park), and longer if it rains again. Other problems have fixed lifetimes (fallen tree 3 days, closure 7 days, potholes 14 days, stuck vehicle 6 h, animals on the road 1 h). Anyone can mark a report *still there* or *gone*.
 - **Verify sightings on the spot.** Within 400 m of another driver's sighting, with a live GPS fix (accurate to 100 m or better), you can tap *I see it*. The sighting gets a green tick, its time is refreshed, the verifier's name and vehicle (from the trip pass) and distance are shown, the animal is ticked on your list and you earn 5 points. *Not there any more* also needs you to be near (the reporter can always remove their own). The app alerts you, by voice and vibration, when you come within 400 m of a sighting, with *I see it* / *Not here* buttons. This works while the app is open on screen (a web app cannot alert in the background). Turn it off in Settings.
 - **Your vehicle on the map.** Instead of a dot, your position shows as a top-down vehicle that turns with your heading: 4x4/SUV, open safari vehicle, pop-top van, pickup, car or minibus, in your colour, with an optional plate or name tag. An avatar floats above it: an animal or person emoji, your initials, or a photo (kept on the phone only). Choose *Driving* or *Being driven*: passengers can type in the chat while moving, and speed alerts then talk about the vehicle. Open it from Settings or by tapping your vehicle; it can also update the vehicle on your trip pass.
-- **Leaderboard.** Under Animals → 🏆 Board. Join with a nickname and an animal avatar; choose whether to appear on the park-wide board. Points: ticked animals (5–40 by rarity), badges, +5 per sighting you verify on the spot, +3 when another driver verifies yours. Views for *Today*, *This week* and *Overall* (Rwanda time), a podium, rank changes since your last visit, 👑 for the week's leader, 🔥 for days in a row, "points to pass" the next driver and a toast when you move up. Private groups (family, office) with a 6-character code and an invite link (`?join=CODE`), and a shareable score-card picture. Only the nickname, avatar, level and points are shared; entries untouched for 90 days are removed.
-- **Trip planner.** Go → *Plan a trip with several stops*, or *Add to trip plan* on any place or sighting. Tap places, junction stones or sightings on the map (or pick them from lists) to add up to 12 stops, set how long you stay at each, reorder them or let the app find the quickest order, and finish at the last stop, back at the start or at a gate. Choose *Leave at* (now or a time today or tomorrow) or *Arrive by*: the app gives the departure time and, for every stop, an arrival range that allows for animals on the road, photo stops and tracks, at a Direct, Game-drive or Slow pace. Warnings for park hours, sunset, storms on the way and closed tracks; sightings near the route. Save plans (they work offline), share them as text, preview step by step or start navigation through all stops.
+- **Leaderboard.** Under Animals → 🏆 Board. Join with a nickname and an animal avatar; choose whether to appear on the park-wide board. Points: ticked animals (5–40 by rarity), badges, +5 per sighting you verify on the spot, +3 when another driver verifies yours. Views for *Today*, *This week* and *Overall* (Rwanda time), a podium, rank changes since your last visit, 👑 for the week's leader, 🔥 for days in a row, "points to pass" the next driver and a toast when you move up. Your groups (see below) get their own board, and there is a shareable score-card picture. Only the nickname, avatar, level and points are shared; entries untouched for 90 days are removed.
+- **Trip mode.** Go → *Plan a trip*: the map switches to trip mode with a bar at the bottom showing the stops, distance, time and arrival. Tap anything on the map (a junction stone, lodge, sighting or any point on a road) and press **＋ Add as stop**, or press **＋ Add** for lists of animals, places, junction stones and sightings. Tap a stop's pin to change the stay time, move it earlier or later, or remove it. ▶ *Start* navigates through all stops; ☰ *Details* opens the full planner.
+- **Trip planner.** The full view behind ☰ *Details*, also reached with *＋ Add as a stop in my trip* on any place or sighting. Tap places, junction stones or sightings on the map (or pick them from lists) to add up to 12 stops, set how long you stay at each, reorder them or let the app find the quickest order, and finish at the last stop, back at the start or at a gate. Choose *Leave at* (now or a time today or tomorrow) or *Arrive by*: the app gives the departure time and, for every stop, an arrival range that allows for animals on the road, photo stops and tracks, at a Direct, Game-drive or Slow pace. Warnings for park hours, sunset, storms on the way and closed tracks; sightings near the route. Save plans (they work offline), share them as text, preview step by step or start navigation through all stops.
 - **Works without signal.** Tap the sharing pill (Live / No signal) or Settings → *Offline use and downloads*: one tap saves the app, the park and OpenStreetMap data, the official park map, animal photos and the 7-day forecast (about 5 MB) and asks the phone to protect it from clean-up. A checklist shows what is saved. *Offline mode* uses only saved data (saves data and battery): reports, verifications and chat wait on the phone and send when it is switched off. With weak signal the app starts from the saved copy after 3 seconds instead of waiting. Satellite images cannot be downloaded in advance (only areas you have viewed are kept).
 - **Weather.** Open-Meteo forecast for the north, centre and south of the park: now, the next 12 hours, 7 days, sunrise and sunset, tips for game viewing, and track wetness. Storm and heavy-rain warnings for the next 3 hours (with lightning advice for open or hard-top vehicles), rain and sunset notes in route plans, and routes that avoid tracks more when heavy rain is coming. The last forecast is kept for offline use.
 - **Official park map.** The park's own A3 map (2020) is in the app: open it full page from *Layers* (pinch to zoom, download the PDF), or lay it over the live map as a layer with adjustable opacity, fitted to the junction stones, lakes and landmarks (typical offset 0.3–0.5 km). *Keep the official map for offline use* saves it on the phone. Data from it (`data/official.json`): tracks that OpenStreetMap marks closed but the official map shows as roads (Rhino Boma Road, Kajumbura Road, Rurama Loop) are drawn amber dashed and used for routes with a reminder to check at reception (switch off in Settings); the Magashi Peninsula is a no-through road (private concession); ruins and old park buildings are marked; junction stones 25, 56 and 57 use the official map's positions.
@@ -150,6 +151,34 @@ service cloud.firestore {
         allow delete: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/dms/$(pair)).data.members;
       }
     }
+    // Groups with chat (members join with a 6-character invite code)
+    function isMember(code) { return signedIn() && request.auth.uid in get(/databases/$(database)/documents/groups/$(code)).data.members; }
+    match /groups/{code} {
+      allow get: if signedIn();
+      allow list: if signedIn() && request.auth.uid in resource.data.members;
+      allow create: if signedIn() && code.matches('^[A-Z2-9]{6}$')
+        && request.resource.data.keys().hasOnly(['name','by','createdAt','members','people'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 40
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.members == [request.auth.uid]
+        && request.resource.data.people.keys().hasOnly([request.auth.uid])
+        && request.resource.data.createdAt == request.time;
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members','people'])
+        && request.resource.data.members.size() <= 60
+        && (request.resource.data.members.toSet() == resource.data.members.toSet().union([request.auth.uid].toSet())
+            || request.resource.data.members.toSet() == resource.data.members.toSet().difference([request.auth.uid].toSet()))
+        && request.resource.data.people.diff(resource.data.people).affectedKeys().hasOnly([request.auth.uid]);
+      allow delete: if signedIn() && resource.data.by == request.auth.uid;
+      match /msgs/{id} {
+        allow read: if isMember(code);
+        allow create: if isMember(code) && request.resource.data.uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['uid','name','emoji','vehicle','text','at','expiresAt','kind','rep'])
+          && request.resource.data.text is string && request.resource.data.text.size() <= 1500
+          && request.resource.data.expiresAt is timestamp && request.resource.data.expiresAt < request.time + duration.value(31, 'd');
+        allow delete: if signedIn() && (resource.data.uid == request.auth.uid || resource.data.expiresAt < request.time);
+      }
+    }
   }
 }
 ```
@@ -161,6 +190,7 @@ The Firebase web config is not a secret; the rules above decide what visitors ca
 A **trip pass** is a temporary driver profile: a name or nickname, the vehicle (model and colour), who is in the car and a sign (an animal emoji). There is no password or email; the phone gets an anonymous Firebase sign-in. The driver picks the arrival and leaving dates (1 to 7 days, up to 30 days ahead). Chat and the driver list work only on those days. After the last day the pass disappears for other drivers and the trip details (name, vehicle, dates) are kept for 30 days in a private record only the driver can read, so the next trip can reuse them; the person running the app can also see them in the Firebase console. The driver can add a day, edit, or end the trip at once, which deletes everything including the 30-day record.
 
 - **Park chat** for everyone with a pass who opted in. Messages last 24 hours. Quick replies ("Still there?", "On my way") and one-tap sharing of a sighting as a card others can open or navigate to.
+- **Groups with chat.** Chat → *Groups* → *＋ New group*: give it a name and you get a 6-character code, a QR code and an invite link (`?join=CODE`) to share by WhatsApp, SMS or any app. Opening the link (or scanning the QR code) joins the group in one tap. Each group has its own chat (messages last 30 days), its own leaderboard, and one-tap sharing of a sighting or your whole trip plan. Up to 8 groups per phone, 60 members per group. Old leaderboard group codes keep working.
 - **Private messages** between two drivers, deleted after 4 days. Any driver can be blocked on your phone.
 - **Driving lock:** typing is paused above 10 km/h unless you confirm you are a passenger. Quick replies still work.
 - Reports show "Reported by Elies · White Toyota Prado" while the pass is active (can be switched off); afterwards the name disappears.
@@ -190,5 +220,6 @@ The red **SOS** button opens a screen that works offline: one-tap calls to 112 (
 | `data/official.json` | Data from the park's official map (2020): its roads, the Magashi no-through area, ruins |
 | `data/official/` | The official map: PDF, full-page image and map tiles (zoom 10–14) |
 | `tools/build_osm.py` | Builds `data/osm.json` |
+| `lib/qrcode.js` | QR codes for group invites ([qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator), MIT licence) |
 
 Prepared by Elies Bazine, November 2026.

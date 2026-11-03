@@ -36,6 +36,7 @@
 
   <div class="mapwrap" id="mapwrap">
     <div class="tiltbox" id="tiltbox"><canvas id="map" aria-label="Map of Akagera National Park"></canvas></div>
+    <canvas class="car3d" id="car3d" aria-hidden="true"></canvas>
 
     <!-- browse controls -->
     <div class="fabcol" id="fabcol">
@@ -49,6 +50,8 @@
     <div class="bgtoggle" role="group" aria-label="Background"><button type="button" data-bg="map" class="on" aria-pressed="true">Map</button><button type="button" data-bg="sat" aria-pressed="false">Satellite</button></div>
     <div class="banner" id="banner" hidden></div>
     <div class="nearcard" id="nearCard" role="status" aria-live="polite" hidden></div>
+    <div class="planpop" id="planPop" hidden></div>
+    <div class="plandock" id="planDock" hidden></div>
     <div class="bottom" id="bottomBar">
       <div class="gpsline" id="gpsline">Starting GPS…</div>
       <div class="btns">

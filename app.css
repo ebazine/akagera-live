@@ -411,3 +411,40 @@ a.secondary{display:flex;align-items:center;justify-content:center;text-decorati
 .pltools{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.pltools .secondary{margin:0}
 .planbar{top:58px;right:10px;background:#7A3A0E}.planbar .ghost{background:rgba(255,255,255,.18);color:#fff}
 .planbar[hidden]{display:none}
+/* trip mode */
+.planmode .bottom,.planmode #nearCard{display:none}
+.plandock{position:absolute;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));max-width:560px;background:#fff;border-radius:20px;box-shadow:0 8px 26px rgba(0,0,0,.3);padding:10px;z-index:6;display:flex;flex-direction:column;gap:8px}
+.plandock[hidden],.planpop[hidden]{display:none}
+.pdtop{display:grid;grid-template-columns:1fr auto;align-items:center;column-gap:8px}
+.pdtop b{font-size:17px}.pdtop small{grid-column:1;color:var(--muted);font-size:13.5px;line-height:1.3}.pdtop .pdx{grid-row:1/3;grid-column:2}
+.pdx{border:0;width:40px;height:40px;border-radius:12px;background:var(--soft);font-size:24px;line-height:1;color:var(--ink)}
+.pchips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.pchip{flex:none;border:1px solid #F0C8A8;background:#FFF5EC;color:#6A3510;border-radius:999px;padding:7px 11px 7px 7px;font-weight:700;font-size:14px;display:flex;align-items:center;gap:6px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pchip i{font-style:normal;background:#E35F14;color:#fff;border-radius:50%;width:22px;height:22px;display:grid;place-items:center;font-size:12.5px;flex:none}
+.pchip.an i{background:#B5651D}.pchip.s{background:#EEF4FA;border-color:#C8DAEC;color:#1D4F86;padding-left:11px}.pchip.end{background:#F1F6EE;border-color:#CFE3C6;color:#1E4D2E;padding-left:11px}
+.pdbtns{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:8px}
+.pdbtns button,.ppbtns button{border:0;border-radius:14px;min-height:50px;font-weight:800;font-size:16px}
+.pdadd{background:#E35F14;color:#fff}.pdadd.big{font-size:17px}
+.pdsec{background:var(--soft);color:var(--ink)}
+.pdgo{background:var(--nav);color:#fff}.pdgo:disabled{opacity:.4}
+.planpop{position:absolute;left:10px;right:10px;max-width:560px;background:#fff;border:2px solid #E35F14;border-radius:18px;box-shadow:0 8px 24px rgba(0,0,0,.28);padding:10px;z-index:7;display:flex;flex-direction:column;gap:8px;animation:ncin .2s ease-out}
+.pptop{display:flex;gap:10px;align-items:center}.pptop>div{flex:1;min-width:0}.pptop b{display:block;font-size:17px}.pptop small{display:block;color:var(--muted);font-size:13.5px;line-height:1.3}
+.ppic{width:40px;height:40px;border-radius:50%;background:#FFF5EC;display:grid;place-items:center;font-size:22px;flex:none}
+.ppbtns{display:flex;gap:8px;flex-wrap:wrap}.ppbtns .pdadd{flex:2}.ppbtns .pdsec{flex:1}.ppbtns .pldw{flex:1;min-height:42px}.ppbtns .plmini{min-height:42px;padding:0 10px}
+.addgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.addgrid button{border:1px solid var(--line);background:#fff;border-radius:16px;padding:14px 10px;display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center}
+.addgrid span{font-size:32px}.addgrid b{font-size:16px}.addgrid small{color:var(--muted);font-size:13px}
+.pltx small.fresh{color:#7A4A12}.pltx small.stale{color:#9A5B00;font-weight:600}
+/* groups */
+.grbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.grbtns button{margin:0}
+.grlist li.unread b{font-weight:800}.udot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#E35F14;margin-left:6px}
+.grhead{display:flex;align-items:center;gap:8px;background:#EEF4FA;border-radius:14px;padding:8px 10px;margin:8px 0}.grhead>div{flex:1}.grhead b{display:block;font-size:16px}.grhead small{color:var(--muted);font-size:13px}
+.grinvite{display:flex;gap:14px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:16px;padding:12px;margin:10px 0}
+.qrbox{width:150px;height:150px;flex:none}.qrbox svg{width:100%;height:100%;display:block}
+.grinvite small{display:block;color:var(--muted);font-size:13.5px;line-height:1.35}.bigcode{display:block;font-size:30px;letter-spacing:2px;font-variant-numeric:tabular-nums;margin:2px 0 6px}
+.grcode{font-size:24px;letter-spacing:3px;text-align:center;text-transform:uppercase}
+.msg .txt{white-space:pre-line}
+/* 3D vehicle while driving */
+.car3d{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+
+.grmem{display:flex;align-items:center;gap:12px;padding:8px 4px}.grmem .em{font-size:26px;width:34px;text-align:center}.grmem b{display:block}.grmem small{display:block;color:var(--muted,#6b7177);font-size:13px}
