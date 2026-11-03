@@ -72,9 +72,9 @@ const S = {
   gps:{ok:false,denied:false,x:0,y:0,lat:0,lon:0,acc:0,heading:null,speed:0,t:0},
   manual: LS.get('manual', null), useManual: LS.get('useManual', false),
   live:[], local: LS.get('local', []), sync:'local', fs:null,
-  wx: LS.get('wx', null),
+  wx: LS.get('wx', null), lastSync: LS.get('lastSync', 0),
   route:null, nav:null,
-  set: Object.assign({voice:true, tilt:true, wake:true, sat:false, hideEx:false, speedWarn:true, closedOk:false, officialOk:true, offOp:.85, nearAlert:true}, LS.get('settings', {})),
+  set: Object.assign({voice:true, tilt:true, wake:true, sat:false, hideEx:false, speedWarn:true, closedOk:false, officialOk:true, offOp:.85, nearAlert:true, wxAlerts:true, offline:false}, LS.get('settings', {})),
   device: LS.get('dev', null) || (()=>{const d='d'+Math.random().toString(36).slice(2,10);LS.set('dev',d);return d;})(),
   sim:null, follow:true, view:'browse'
 };
@@ -274,7 +274,7 @@ function penalties(){
   for(const r of activeRoadReports()){const [x,y]=merc(r.lon,r.lat);
     const f=r.sev==='3'?Infinity:r.sev==='2'?2.5:1.4;
     for(const si of segsNear(x,y,150)){const [a,b]=G.segs[si];const p=projSeg(x,y,G.X[a],G.Y[a],G.X[b],G.Y[b]);if(p.d<120){pen.set(si,Math.max(pen.get(si)||1,f));reasons.set(si,r);}}}
-  const wet=wetness(); const wf=1+Math.min(0.6,wet/30);
+  const wet=wetness()+0.6*soonRain(3); const wf=1+Math.min(0.6,wet/30);   // past rain, plus heavy rain expected in the next hours
   return {pen,reasons,wf};
 }
 function route(fromX,fromY,toX,toY,destName,opt={}){
@@ -386,22 +386,49 @@ function instrText(s,withRoad=true){
 /* =========================================================================
    5. Weather (Open-Meteo) and how long road problems last
    ========================================================================= */
-const WXPTS=[{n:'north',lat:-1.45,lon:30.58},{n:'central',lat:-1.66,lon:30.70},{n:'south',lat:-1.87,lon:30.73}];
+const WXPTS=[{n:'north',name:'North (Kilala, Karenge)',lat:-1.45,lon:30.58},{n:'central',name:'Centre (Mutumba, Lake Hago)',lat:-1.66,lon:30.70},{n:'south',name:'South (Lake Ihema, park HQ)',lat:-1.87,lon:30.73}];
+const RW=2*3600e3;                                                     // Rwanda time (UTC+2), for the park's opening hours
+const rwHour=t=>{const d=new Date(t+RW);return d.getUTCHours()+d.getUTCMinutes()/60;};
 async function loadWeather(force){
-  if(!force&&S.wx&&Date.now()-S.wx.fetched<30*60e3)return;
+  if(offlineMode()){updateWxPill();return;}
+  if(!force&&S.wx&&S.wx.v===2&&Date.now()-S.wx.fetched<45*60e3)return;
   try{
-    const u=`https://api.open-meteo.com/v1/forecast?latitude=${WXPTS.map(p=>p.lat).join(',')}&longitude=${WXPTS.map(p=>p.lon).join(',')}&hourly=precipitation&past_days=5&forecast_days=2&timeformat=unixtime&timezone=GMT`;
+    const H='precipitation,precipitation_probability,temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,uv_index,is_day';
+    const D='weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset,uv_index_max,wind_gusts_10m_max';
+    const u=`https://api.open-meteo.com/v1/forecast?latitude=${WXPTS.map(p=>p.lat).join(',')}&longitude=${WXPTS.map(p=>p.lon).join(',')}&hourly=${H}&daily=${D}&past_days=5&forecast_days=7&timeformat=unixtime&timezone=Africa%2FKigali`;
     const r=await fetch(u);if(!r.ok)throw 0;let j=await r.json();if(!Array.isArray(j))j=[j];
-    S.wx={fetched:Date.now(),pts:j.map(o=>({t:o.hourly.time.map(x=>x*1000),p:o.hourly.precipitation.map(v=>v||0)}))};
+    const ms=a=>(a||[]).map(x=>x*1000),num=a=>(a||[]).map(v=>v==null?null:+v);
+    S.wx={v:2,fetched:Date.now(),pts:j.map(o=>{const h=o.hourly||{},d=o.daily||{};return {t:ms(h.time),p:(h.precipitation||[]).map(v=>v||0),pp:num(h.precipitation_probability),T:num(h.temperature_2m),wc:num(h.weather_code),w:num(h.wind_speed_10m),g:num(h.wind_gusts_10m),uv:num(h.uv_index),day:num(h.is_day),
+      d:{t:ms(d.time),wc:num(d.weather_code),tmax:num(d.temperature_2m_max),tmin:num(d.temperature_2m_min),psum:num(d.precipitation_sum),ppmax:num(d.precipitation_probability_max),rise:ms(d.sunrise),set:ms(d.sunset),uvmax:num(d.uv_index_max),gmax:num(d.wind_gusts_10m_max)}};})};
     LS.set('wx',S.wx);
   }catch(e){}
-  updateWxPill();redraw();
+  updateWxPill();redraw();checkWxAlerts();if(sheetView==='wx')openWeather(true);
 }
 function wxIdx(lat){let b=0,bd=1e9;WXPTS.forEach((p,i)=>{const d=Math.abs(p.lat-lat);if(d<bd){bd=d;b=i;}});return b;}
 function wxPt(lat){return S.wx&&S.wx.pts[wxIdx(lat)];}
+function wxHere(){const p=myPos();const lat=p&&inRing(p.x,p.y,S.park)?p.lat:(p&&outsideBy(p)<15000?p.lat:unmerc(cam.cx,cam.cy).lat);return {lat,i:wxIdx(lat),pt:wxPt(lat)};}
 function rainSum(pt,t0,t1){if(!pt)return 0;let s=0;for(let i=0;i<pt.t.length;i++){const t=pt.t[i]+3600e3;if(t>t0&&t<=t1)s+=pt.p[i];}return s;}
 function lastRain(pt,t0,t1,thr=0.3){if(!pt)return null;let r=null;for(let i=0;i<pt.t.length;i++){const t=pt.t[i]+3600e3;if(t>t0&&t<=t1&&pt.p[i]>=thr)r=t;}return r;}
 function wetness(){if(!S.wx)return 0;const now=Date.now();return Math.max(...S.wx.pts.map(pt=>rainSum(pt,now-24*3600e3,now)));}
+function soonRain(h=3){if(!S.wx)return 0;const now=Date.now();return Math.max(...S.wx.pts.map(pt=>rainSum(pt,now,now+h*3600e3)));}
+/* weather codes (WMO) to words and pictures */
+function wmo(c,day=1){c=+c;
+  if(c===0)return [day?'☀️':'🌙','Clear'];if(c===1)return [day?'🌤️':'🌙','Mostly clear'];if(c===2)return ['⛅','Partly cloudy'];if(c===3)return ['☁️','Cloudy'];
+  if(c===45||c===48)return ['🌫️','Fog'];if(c>=51&&c<=57)return ['🌦️','Drizzle'];if(c===61||c===80)return ['🌦️','Light rain'];if(c===63||c===81)return ['🌧️','Rain'];
+  if(c===65||c===82||c===66||c===67)return ['🌧️','Heavy rain'];if(c>=71&&c<=77)return ['🌨️','Hail or sleet'];if(c===95)return ['⛈️','Thunderstorm'];if(c===96||c===99)return ['⛈️','Thunderstorm with hail'];return ['🌡️','—'];}
+function hourIdx(pt,t){if(!pt||!pt.t.length)return -1;let i=-1;for(let k=0;k<pt.t.length;k++){if(pt.t[k]<=t)i=k;else break;}return i;}
+function wxAt(pt,t){const i=hourIdx(pt,t);if(i<0||!pt.T)return null;return {i,t:pt.t[i],T:pt.T[i],wc:pt.wc[i],p:pt.p[i],pp:pt.pp[i],w:pt.w[i],g:pt.g[i],uv:pt.uv[i],day:pt.day[i]!==0};}
+function dayAt(pt,t){if(!pt||!pt.d||!pt.d.t.length)return null;let i=-1;for(let k=0;k<pt.d.t.length;k++)if(pt.d.t[k]<=t+1)i=k;if(i<0)return null;const d=pt.d;return {i,t:d.t[i],wc:d.wc[i],tmax:d.tmax[i],tmin:d.tmin[i],psum:d.psum[i],ppmax:d.ppmax[i],rise:d.rise[i],set:d.set[i],uvmax:d.uvmax[i],gmax:d.gmax[i]};}
+/* storms and heavy rain in a time window */
+function wxRisks(pt,t0,t1){const out=[];if(!pt||!pt.wc)return out;
+  for(let i=0;i<pt.t.length;i++){const t=pt.t[i];if(t+3600e3<=t0||t>t1)continue;const wc=pt.wc[i],p=pt.p[i]||0,pp=pt.pp[i]||0;
+    const kind=wc>=95?'storm':(p>=4||wc===65||wc===82)?'heavy':(pp>=60&&p>=0.8)?'rain':null;if(kind)out.push({t,kind,p,pp,wc});}
+  return out;}
+function riskText(rs){if(!rs.length)return '';const k=rs.some(r=>r.kind==='storm')?'storm':rs.some(r=>r.kind==='heavy')?'heavy':'rain';
+  const a=rs[0].t,b=rs[rs.length-1].t+3600e3,pp=Math.max(...rs.map(r=>r.pp||0));
+  return {kind:k,icon:k==='storm'?'⛈️':'🌧️',word:k==='storm'?'Thunderstorms likely':k==='heavy'?'Heavy rain likely':'Rain likely',span:`${hhmm(a)}–${hhmm(b)}`,a,b,pp};}
+function lightningAdvice(){const t=carSet().type;return t==='open'?'An open safari vehicle gives no lightning protection: head for a lodge, campsite building or a hard-top vehicle, and keep away from lone trees and water.':'A hard-top vehicle is a safe place in lightning: stay inside with the windows up, and do not stand outside, under lone trees or by the water.';}
+/* road problems: how long they last after rain */
 function roadLife(r){
   const rule=RD[r.type][3];const t0=r.lastSeen||r.at;const now=Date.now();
   if(!rule.wet)return {until:t0+rule.base*3600e3,why:`${RD[r.type][1]} reports stay up for ${rule.base>=48?Math.round(rule.base/24)+' days':rule.base+' h'} unless someone marks them gone.`};
@@ -416,11 +443,26 @@ function roadLife(r){
   const raining=lastRain(pt,now-3600e3,now)!=null;
   return {until,why:`${Math.round(mm)} mm of rain fell in the 48 h up to ${stamp(lr)}${raining?' and it is still raining':''}. ${RD[r.type][1]} needs about ${Math.round(dry)} h of dry weather to clear.`,next:nextRain,mm};
 }
+function trackState(pt){const now=Date.now();const lr=lastRain(pt,now-5*864e5,now);if(!lr)return {txt:'Dry',cls:'dry'};const mud=RD.mud[3];const mm=rainSum(pt,lr-48*3600e3,lr);const until=lr+Math.min(mud.cap,mud.dry+mud.perMm*mm)*3600e3;
+  return until<now?{txt:'Dry',cls:'dry'}:mm>=10?{txt:'Muddy',cls:'mud',until}:{txt:'Damp',cls:'damp',until};}
 function updateWxPill(){
-  const p=$('wxPill'),t=$('wxText');if(!S.wx){t.textContent='–';return;}
-  const now=Date.now();const r24=wetness();const next=Math.max(...S.wx.pts.map(pt=>rainSum(pt,now,now+6*3600e3)));
-  p.classList.toggle('wet',r24>=3||next>=2);
-  t.textContent=r24>=0.5?`${r24.toFixed(r24<10?1:0)} mm`:next>=1?'Rain soon':'Dry';
+  const p=$('wxPill'),t=$('wxText'),ic=p.querySelector('.wxi');if(!S.wx){t.textContent='–';return;}
+  const now=Date.now(),{pt}=wxHere(),w=pt&&S.wx.v===2?wxAt(pt,now):null;
+  const soon=pt?Math.max(0,...(pt.pp||[]).filter((v,i)=>pt.t[i]>=now-3600e3&&pt.t[i]<now+3*3600e3).map(v=>v||0)):0;
+  const risk=pt?riskText(wxRisks(pt,now,now+3*3600e3)):'';
+  p.classList.toggle('wet',!!risk||soon>=60||wetness()>=3);p.classList.toggle('stale',now-S.wx.fetched>3*3600e3);
+  if(w){const [i]=wmo(w.wc,w.day);ic.textContent=risk&&risk.kind==='storm'?'⛈️':i;t.textContent=`${Math.round(w.T)}°${soon>=40?` ${Math.round(soon/10)*10}%`:''}`;}
+  else{ic.textContent='☁';const r24=wetness(),next=Math.max(...S.wx.pts.map(q=>rainSum(q,now,now+6*3600e3)));t.textContent=r24>=0.5?`${r24.toFixed(r24<10?1:0)} mm`:next>=1?'Rain soon':'Dry';}
+  p.setAttribute('aria-label',`Weather${w?`: ${wmo(w.wc,w.day)[1]}, ${Math.round(w.T)} degrees`:''}`);
+}
+/* a warning when a storm or heavy rain is coming in the next 3 hours */
+function checkWxAlerts(){
+  if(!S.wx||S.wx.v!==2||S.set.wxAlerts===false)return;const now=Date.now(),{pt,i}=wxHere();const rs=wxRisks(pt,now,now+3*3600e3).filter(r=>r.kind!=='rain');if(!rs.length)return;
+  const R=riskText(rs),key=`${i}|${R.kind}|${new Date(R.a+RW).toISOString().slice(0,13)}`,seen=LS.get('wxSeen',{});if(seen[key])return;
+  seen[key]=now;for(const k in seen)if(now-seen[k]>864e5)delete seen[k];LS.set('wxSeen',seen);
+  const msg=`${R.icon} ${R.word} ${R.a<=now?'now':'from '+hhmm(R.a)} in the ${WXPTS[i].n} of the park.`;
+  toast(msg,'Details',()=>openWeather(),9000);try{navigator.vibrate&&navigator.vibrate([200,100,200]);}catch(e){}
+  if(S.nav)say(`${R.word} ${R.a<=now?'now':'from '+hhmm(R.a)}. ${R.kind==='storm'?'Stay in your vehicle.':'Tracks will get slippery.'}`);
 }
 
 /* =========================================================================
@@ -451,19 +493,21 @@ async function initSharing(){
     const F=await import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`);
     const app=A.initializeApp(cfg);
     let db;try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache({tabManager:F.persistentMultipleTabManager()})});}catch(e){db=F.getFirestore(app);}
-    S.fs={F,db,uid:null};
+    S.fs={F,db,uid:null};if(S.set.offline)F.disableNetwork(db).catch(()=>{});
     S.fs.authReady=import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`).then(AU=>{const auth=AU.getAuth(app);S.fs.AU=AU;S.fs.auth=auth;
       AU.onAuthStateChanged(auth,u=>{S.fs.uid=u?u.uid:null;if(u&&passValid())startSocial();else if(!u)endSocial();if(u)setTimeout(socTick,1500);});}).catch(()=>{});
     const q=F.query(F.collection(db,'reports'),F.where('at','>',Date.now()-14*864e5),F.orderBy('at','desc'),F.limit(600));
     F.onSnapshot(q,{includeMetadataChanges:true},snap=>{
       S.live=snap.docs.map(d=>{const o=clean(d.id,d.data());if(o)o.pending=d.metadata.hasPendingWrites;return o;}).filter(Boolean);
-      S.sync=snap.metadata.fromCache?'offline':'live';if(S.live.length)hideBanner();setSync();redraw();refreshSheet();checkSOS();checkNear(true);checkScouted();
+      S.sync=snap.metadata.fromCache?'offline':'live';if(!snap.metadata.fromCache){S.lastSync=Date.now();LS.set('lastSync',S.lastSync);}if(S.live.length)hideBanner();setSync();redraw();refreshSheet();checkSOS();checkNear(true);checkScouted();
     },err=>{S.sync='error';setSync();});
   }catch(e){S.sync='local';setSync();}
 }
 function setSync(){
   const p=$('syncPill'),t=p.querySelector('span');p.className='pill';
   const pend=allReports().filter(r=>r.pending).length;
+  if(S.set.offline){p.classList.add('off','mode');t.textContent=pend?`${pend} waiting`:'Offline';return;}
+  if(!navigator.onLine&&S.sync!=='local'){p.classList.add('off');t.textContent=pend?`${pend} waiting`:'No signal';return;}
   if(S.sync==='live'){p.classList.add(pend?'off':'live');t.textContent=pend?`${pend} queued`:'Live';}
   else if(S.sync==='offline'){p.classList.add('off');t.textContent=pend?`${pend} queued`:'Offline';}
   else if(S.sync==='connecting'){t.textContent='…';}
@@ -515,7 +559,7 @@ const emoji=r=>r.kind==='animal'?AN[r.type][2]:RD[r.type][2];
    ========================================================================= */
 const PH={url:LS.get('photos',{}),page:LS.get('photoPages',{}),img:{}};
 async function loadPhotos(){
-  if(!navigator.onLine)return;
+  if(offlineMode())return;
   const todo=SP.filter(x=>x.wiki&&!PH.url[x.id]);
   for(let i=0;i<todo.length;i+=4){
     await Promise.all(todo.slice(i,i+4).map(async x=>{try{
@@ -630,9 +674,9 @@ function centerOn(x,y,s){cam.cx=x;cam.cy=y;if(s)cam.s=s;redraw();}
 
 /* raster tiles (satellite) */
 const tiles=new Map();
-function tile(z,x,y){const k=z+'/'+x+'/'+y;let t=tiles.get(k);if(t){t.used=Date.now();return t.ok?t.img:null;}if(!navigator.onLine)return null;
+function tile(z,x,y){const k=z+'/'+x+'/'+y;let t=tiles.get(k);if(t){t.used=Date.now();return t.ok?t.img:null;}   // offline: the service worker answers from saved tiles
   const img=new Image();img.crossOrigin='anonymous';t={img,ok:false,used:Date.now()};tiles.set(k,t);
-  img.onload=()=>{t.ok=true;redraw();};img.onerror=()=>{};img.src=`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+  img.onload=()=>{t.ok=true;redraw();};img.onerror=()=>{setTimeout(()=>tiles.delete(k),60e3);};img.src=`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
   if(tiles.size>500){const old=[...tiles.entries()].sort((a,b)=>a[1].used-b[1].used).slice(0,100);for(const [kk] of old)tiles.delete(kk);}return null;}
 function drawTiles(m){
   const z=clamp(Math.round(Math.log2(cam.s*2*Math.PI*ER/256)),3,18);const size=2*Math.PI*ER/2**z;
@@ -1179,6 +1223,12 @@ function showPlan(r,title,top=[]){
   if(r.offLen>50){const nm=r.offNames.length?r.offNames.join(', '):'a track';nodes.push(el('div',{class:'warnrow',style:'background:#FFF1D6;color:#6A4300',text:`ⓘ ${fmtD(r.offLen)} of this route is on ${nm}. The official park map shows it as a road, but OpenStreetMap marks it closed to visitors. Ask at reception or a ranger post whether it is open today.`}));}
   if(r.closedLen>50)nodes.push(el('div',{class:'warnrow',text:`⛔ ${fmtD(r.closedLen)} of this route is on ${r.closedNames.length?r.closedNames.join(', '):'tracks'} that OpenStreetMap marks as closed to visitors and that are not on the official park map. Check with a ranger before you drive ${r.closedNames.length>1?'them':'it'}.`}));
   if(r.approxLen>100)nodes.push(el('div',{class:'warnrow',style:'background:#F3EADB;color:#5A3D1A',text:`${fmtD(r.approxLen)} of this route is on a track from the park board that is not yet on OpenStreetMap (dashed on the map). The line is approximate, so follow the junction stones.`}));
+  {const now=Date.now(),eta=now+r.time*1000;const pts=[r.pts[0],r.pts[r.pts.length>>1],r.pts[r.pts.length-1]].map(q=>wxPt(unmerc(q[0],q[1]).lat)).filter(Boolean);
+    const rs=[].concat(...[...new Set(pts)].map(q=>wxRisks(q,now,eta+1800e3))).sort((a,b)=>a.t-b.t);const R=riskText(rs);
+    if(R)nodes.push(el('div',{class:'warnrow'+(R.kind==='storm'?' storm':''),style:R.kind==='storm'?'':'background:#DCEAF8;color:#1D4F86',text:`${R.icon} ${R.word} on this route ${R.a<=now?'now':'from '+hhmm(R.a)} (up to ${Math.round(R.pp)}%). ${R.kind==='storm'?lightningAdvice():'Tracks get slippery fast, so the route keeps to main roads where it can.'}`}));
+    const d=pts[0]&&dayAt(pts[0],now);
+    if(d&&d.set&&eta>d.set-10*60e3&&now<d.set)nodes.push(el('div',{class:'warnrow',style:'background:#F3E6F7;color:#4A2660',text:`🌇 You would arrive about ${hhmm(eta)}, ${eta>d.set?'after':'close to'} sunset (${hhmm(d.set)}). The park is open 06:00–18:00 for day visitors.`}));
+    else if(rwHour(eta)>=18||(rwHour(eta)<rwHour(now)&&eta-now<12*3600e3))nodes.push(el('div',{class:'warnrow',style:'background:#F3E6F7;color:#4A2660',text:`🌇 You would arrive about ${hhmm(eta)}, after 18:00 when the park closes for day visitors.`}));}
   if(wetness()>=5)nodes.push(el('div',{class:'warnrow',style:'background:#DCEAF8;color:#1D4F86',text:`${wetness().toFixed(0)} mm of rain in the last 24 h. Tracks may be muddy, so the route prefers the main roads.`}));
   nodes.push(el('div',{class:'acts'},el('button',{class:'secondary',type:'button',onclick:startPreview,text:'▶ Preview step by step'}),el('button',{class:'primary green',type:'button',onclick:startNav,text:'Start'})));
   if(!myPos().gps)nodes.push(el('p',{class:'fine',text:'Your position is set by hand, so the route starts there. To be guided as you drive, choose "Use my GPS again" in the position menu, or try Demo drive in Settings.'}));
@@ -1623,20 +1673,63 @@ $('sosBtn').onclick=()=>openEmergency();$('sosMini').onclick=()=>openEmergency()
 /* =========================================================================
    12. Weather sheet, settings
    ========================================================================= */
-function openWeather(){
-  const p=myPos();const lat=p?p.lat:-1.75;const pt=wxPt(lat);const nodes=[];
-  if(!pt){nodes.push(el('p',{class:'hint',text:navigator.onLine?'Loading weather…':'No weather data yet. It loads when you have signal and is kept for offline use.'}));openSheet('Weather and roads',nodes,{view:'wx'});loadWeather(true);return;}
-  const now=Date.now();const hrs=[];for(let i=0;i<pt.t.length;i++){if(pt.t[i]>=now-48*3600e3&&pt.t[i]<=now+24*3600e3)hrs.push({t:pt.t[i],p:pt.p[i],f:pt.t[i]>now});}
+function openWeather(refresh){
+  const keep=refresh&&sheetView==='wx'?$('sheetBody').scrollTop:0;
+  const {pt,i:wi}=wxHere();const nodes=[];const now=Date.now();
+  if(!pt){nodes.push(el('p',{class:'hint',text:offlineMode()?'No weather saved yet. It loads when you have signal and is then kept for offline use.':'Loading the forecast…'}));openSheet('Weather',nodes,{view:'wx'});loadWeather(true);return;}
+  const v2=S.wx.v===2&&pt.T&&pt.T.length,age=now-S.wx.fetched;
+  const ageTxt=`Forecast from ${hhmm(S.wx.fetched)} ${dayWord(S.wx.fetched)}${age>3*3600e3?` (${ago(S.wx.fetched)})`:''}${offlineMode()?' · saved on this phone':''}`;
+  if(!v2){nodes.push(el('p',{class:'hint',text:'Getting the full forecast…'}));loadWeather(true);}
+  else{
+    const w=wxAt(pt,now)||wxAt(pt,pt.t[0]),[ic,word]=wmo(w.wc,w.day),d=dayAt(pt,now);
+    const n3=Math.max(0,...pt.pp.filter((v,k)=>pt.t[k]>=now-3600e3&&pt.t[k]<now+3*3600e3).map(v=>v||0));
+    nodes.push(el('div',{class:'wxnow'},el('span',{class:'wxbig',text:ic}),el('div',null,el('b',{text:`${Math.round(w.T)}°C · ${word}`}),
+      el('small',{text:`${WXPTS[wi].name} · rain chance next 3 h ${Math.round(n3)}% · wind ${Math.round(w.w||0)} km/h${(w.g||0)>=35?`, gusts ${Math.round(w.g)}`:''}${w.uv!=null&&w.uv>=6?` · UV ${Math.round(w.uv)} (high)`:''}`}),
+      el('small',{class:age>3*3600e3?'stale':'',text:ageTxt}))));
+    // warnings
+    const R=riskText(wxRisks(pt,now,now+6*3600e3));
+    if(R)nodes.push(el('div',{class:'warnrow'+(R.kind==='storm'?' storm':''),text:`${R.icon} ${R.word} ${R.a<=now?'now, until '+hhmm(R.b):R.span} (up to ${Math.round(R.pp)}%). ${R.kind==='storm'?lightningAdvice():'Tracks get slippery fast; the route planner keeps to main roads.'}`}));
+    // next 12 hours
+    const hrs=[];for(let k=0;k<pt.t.length;k++)if(pt.t[k]>=now-3600e3&&hrs.length<13)hrs.push(k);
+    nodes.push(el('p',{class:'lbl',text:'Next 12 hours'}),el('div',{class:'wxhours'},...hrs.map(k=>{const [hi]=wmo(pt.wc[k],pt.day[k]!==0);const pp=pt.pp[k]||0;
+      return el('div',{class:'wxh'+(k===hrs[0]?' now':'')},el('small',{text:k===hrs[0]?'Now':hhmm(pt.t[k]).slice(0,2)}),el('span',{class:'hi',text:hi}),el('b',{text:`${Math.round(pt.T[k])}°`}),
+        el('i',{class:'pbar'},el('i',{style:`height:${Math.max(4,pp)}%`})),el('small',{class:'pp',text:pp>=10?`${Math.round(pp)}%`:''}));})));
+    // daylight and opening hours
+    if(d&&d.set){const left=d.set-now;
+      nodes.push(el('div',{class:'wxsun'},el('span',{text:`🌅 Sunrise ${hhmm(d.rise)}`}),el('span',{text:`🌇 Sunset ${hhmm(d.set)}`}),
+        el('span',{text:left>0&&now>d.rise?`${fmtDur(left/1000)} of daylight left`:now<d.rise?'Before sunrise':'After sunset'}),
+        el('small',{text:'The park is open 06:00–18:00 for day visitors. Guided night drives are the way to see the park after dark.'})));}
+    // game-viewing tips from the weather
+    const tips=[],h=rwHour(now),tmax=d&&d.tmax,lr=lastRain(pt,now-6*3600e3,now);
+    if(h<9||h>=16)tips.push('Good time for game viewing: animals are most active in the cooler early morning and late afternoon.');
+    else if(tmax!=null&&tmax>=29)tips.push(`Hot day (up to ${Math.round(tmax)}°C): around midday many animals rest in shade or near water, so lake shores such as Ihema, Shakani and Hago are good places to look.`);
+    if(lr&&!R)tips.push('Rain has just passed: grazers often come out onto the open plains again, and birds are busy.');
+    if((w.g||0)>=35)tips.push('Windy: animals tend to be nervous and keep to cover.');
+    if(R&&R.kind!=='storm'&&wetness()>=3)tips.push('Wet tracks: black cotton soil in the north turns slippery quickly. Use 4WD on climbs and keep to the main roads.');
+    if(w.uv!=null&&w.uv>=8)tips.push('Very strong sun: keep water in the car and cover up if you stand in an open vehicle.');
+    if(tips.length)nodes.push(el('p',{class:'lbl',text:'Tips for today'}),el('ul',{class:'wxtips'},...tips.slice(0,3).map(t=>el('li',{text:t}))));
+    // across the park
+    nodes.push(el('p',{class:'lbl',text:'Across the park'}),el('div',{class:'wxparts'},...S.wx.pts.map((q,k)=>{const a=wxAt(q,now);if(!a)return null;const [qi,qw]=wmo(a.wc,a.day);const n6=rainSum(q,now,now+6*3600e3),ts=trackState(q);
+      return el('div',{class:'wxpart'+(k===wi?' here':'')},el('span',{class:'hi',text:qi}),el('div',null,el('b',{text:`${WXPTS[k].name.split(' (')[0]} · ${Math.round(a.T)}°C`}),
+        el('small',{text:`${qw}${n6>=0.5?` · ${n6.toFixed(1)} mm in the next 6 h`:''} · tracks ${ts.txt.toLowerCase()}${ts.until?` until about ${stamp(ts.until)}`:''}`})));})));
+    // next days
+    const D=pt.d,days=[];for(let k=0;k<D.t.length;k++)if(D.t[k]+864e5>now&&days.length<7)days.push(k);
+    nodes.push(el('p',{class:'lbl',text:'Next days'}),el('div',{class:'wxdays'},...days.map((k,n)=>{const [di]=wmo(D.wc[k]);const dt=new Date(D.t[k]+12*3600e3);
+      return el('div',{class:'wxd'},el('b',{text:n===0?'Today':n===1?'Tomorrow':dt.toLocaleDateString([], {weekday:'short',day:'numeric'})}),el('span',{class:'hi',text:di}),
+        el('span',{class:'tt',text:`${Math.round(D.tmax[k])}° / ${Math.round(D.tmin[k])}°`}),el('small',{text:(D.psum[k]||0)>=0.5?`${(D.psum[k]).toFixed(1)} mm · ${Math.round(D.ppmax[k]||0)}%`:'dry'}));})));
+  }
+  // rain history and the roads (works with saved data too)
+  const hrs=[];for(let k=0;k<pt.t.length;k++){if(pt.t[k]>=now-48*3600e3&&pt.t[k]<=now+24*3600e3)hrs.push({t:pt.t[k],p:pt.p[k],f:pt.t[k]>now});}
   const mx=Math.max(2,...hrs.map(h=>h.p));
-  nodes.push(el('p',{class:'hint',text:`For the ${WXPTS[wxIdx(lat)].n} of the park. Updated ${hhmm(S.wx.fetched)} ${dayWord(S.wx.fetched)}.`}));
-  nodes.push(el('div',{class:'bars','aria-label':'Hourly rain, past 48 hours and next 24 hours'},...hrs.map(h=>el('i',{class:h.f?'f':'',style:`height:${Math.max(1,h.p/mx*100)}%`,title:`${stamp(h.t)}: ${h.p} mm`}))));
+  nodes.push(el('p',{class:'lbl',text:'Rain and the tracks'}),el('div',{class:'bars','aria-label':'Hourly rain, past 48 hours and next 24 hours'},...hrs.map(h=>el('i',{class:h.f?'f':'',style:`height:${Math.max(1,h.p/mx*100)}%`,title:`${stamp(h.t)}: ${h.p} mm`}))));
   nodes.push(el('div',{class:'barlbl'},el('span',{text:'48 h ago'}),el('span',{text:'now'}),el('span',{text:'+24 h'})));
   const r24=rainSum(pt,now-24*3600e3,now),r48=rainSum(pt,now-48*3600e3,now),n12=rainSum(pt,now,now+12*3600e3),lr=lastRain(pt,now-5*864e5,now);
   nodes.push(el('div',{class:'wxrow'},el('span',{text:'Rain, last 24 h'}),el('b',{text:`${r24.toFixed(1)} mm`}),el('span',{text:'Rain, last 48 h'}),el('b',{text:`${r48.toFixed(1)} mm`}),el('span',{text:'Forecast, next 12 h'}),el('b',{text:`${n12.toFixed(1)} mm`}),el('span',{text:'Last rain'}),el('b',{text:lr?stamp(lr):'none in 5 days'})));
-  const mud=RD.mud[3];const mm=lr?rainSum(pt,lr-48*3600e3,lr):0;const dryUntil=lr?lr+Math.min(mud.cap,mud.dry+mud.perMm*mm)*3600e3:null;
-  nodes.push(el('div',{class:'dir'},el('p',{text:!lr||dryUntil<now?'Tracks should be dry. Black cotton soil in the north still turns slippery quickly if it rains.':`Tracks likely muddy until about ${stamp(dryUntil)}, after ${Math.round(mm)} mm of rain. Use 4WD on climbs and stay on main roads.`})));
-  nodes.push(el('p',{class:'fine',text:'Road reports for mud, flooding and slippery climbs expire on their own once the ground has had time to dry: a base time plus extra hours for each millimetre of rain, and longer if it rains again. Weather data: Open-Meteo.'}));
-  openSheet('Weather and roads',nodes,{view:'wx'});
+  const ts=trackState(pt);
+  nodes.push(el('div',{class:'dir'},el('p',{text:ts.cls==='dry'?'Tracks should be dry. Black cotton soil in the north still turns slippery quickly if it rains.':`Tracks likely ${ts.txt.toLowerCase()} until about ${stamp(ts.until)}. Use 4WD on climbs and stay on main roads.`})));
+  nodes.push(el('p',{class:'fine',text:'Mud, flooding and slippery-climb reports expire on their own once the ground has had time to dry. The route planner avoids tracks more after rain and when heavy rain is forecast. Weather data: Open-Meteo, for three points in the park.'}));
+  if(!offlineMode())nodes.push(el('button',{class:'secondary',type:'button',onclick:()=>{loadWeather(true);toast('Updating the forecast…');},text:'↻ Update forecast'}));
+  openSheet('Weather',nodes,{view:'wx'});if(keep)$('sheetBody').scrollTop=keep;
 }
 $('wxPill').onclick=openWeather;
 /* =========================================================================
@@ -1674,7 +1767,7 @@ function checkScouted(){let got=null;
     S.myScouted[r.id]={t:Date.now(),type:r.type};got={r,v};}
   if(got){LS.set('myScouted',S.myScouted);toast(`✅ ${got.v.n?got.v.n.split(' · ')[0]:'Another driver'} verified your ${label(got.r).toLowerCase()} sighting. +3 points`);lbPublish();}}
 async function lbPublish(force){
-  if(!LB.joined||!S.fs)return;
+  if(!LB.joined||!S.fs||offlineMode())return;
   const st=myStats(),j=LB.joined;
   const doc={name:j.name,emoji:j.emoji,pub:!!j.pub,groups:(j.groups||[]).slice(0,5),pts:st.pts,pDay:st.pDay,day:dayKey(),pWk:st.pWk,wk:weekKey(),stk:st.stk,n:st.n,ver:st.ver,sc:st.sc,badges:st.badges.slice(0,12),lv:st.lv,rare:st.rare};
   const sig=JSON.stringify(doc);if(!force&&sig===LB.lastPub)return;
@@ -1858,6 +1951,75 @@ function lbHandleLink(){
   openFind('board');
 }
 
+/* =========================================================================
+   Offline: what is saved on the phone, a one-tap download, and offline mode
+   ========================================================================= */
+function offlineMode(){return !!S.set.offline||!navigator.onLine;}
+const OFFLINE_FLAG=new URL('__akl_offline',location.href).href;     // the service worker reads this to stop using the network
+async function setOfflineMode(on){
+  S.set.offline=!!on;saveSet();
+  try{const c=await caches.open('akl-ext');if(on)await c.put(OFFLINE_FLAG,new Response('1'));else await c.delete(OFFLINE_FLAG);}catch(e){}
+  if(S.fs&&S.fs.F&&S.fs.db){try{on?await S.fs.F.disableNetwork(S.fs.db):await S.fs.F.enableNetwork(S.fs.db);}catch(e){}}
+  if(!on){loadWeather(true);loadPhotos();}
+  setSync();updateWxPill();redraw();
+}
+async function offlineStatus(){
+  const st={};
+  try{st.app=!!(await caches.match('app.js',{ignoreSearch:true}))&&!!(await caches.match('data/osm.json',{ignoreSearch:true}));
+    const keys=await (await caches.open('akl-tiles')).keys();
+    st.official=keys.filter(k=>k.url.includes('/data/official/')&&k.url.endsWith('.webp')).length;
+    st.sat=keys.filter(k=>k.url.includes('arcgisonline')).length;
+    const urls=new Set(Object.values(PH.url));st.photos=keys.filter(k=>urls.has(k.url)).length;}catch(e){}
+  try{const j=OFF.idx||await getJSON('data/official/index.json');st.offTotal=Object.values(j.tiles).reduce((a,v)=>a+v.length,0)+1;}catch(e){}
+  try{const e=await navigator.storage.estimate();st.used=e.usage;st.persist=navigator.storage.persisted?await navigator.storage.persisted():false;}catch(e){}
+  return st;
+}
+async function openOffline(){
+  const st=await offlineStatus(),pend=allReports().filter(r=>r.pending).length,offAt=LS.get('offlineAt',0);
+  const row=(ok,title,detail)=>el('div',{class:'offrow '+(ok===true?'ok':ok===false?'no':'part')},el('span',{class:'oi',text:ok===true?'✓':ok===false?'–':'◐'}),el('div',null,el('b',{text:title}),el('small',{text:detail})));
+  const tg=el('input',{type:'checkbox',id:'set-offline'});tg.checked=!!S.set.offline;
+  tg.onchange=async()=>{await setOfflineMode(tg.checked);toast(tg.checked?'Offline mode: only what is saved on this phone is used. Reports wait and send when you switch it off.':'Offline mode is off. Waiting reports are sending.');openOffline();};
+  const state=S.set.offline?['mode','Offline mode is on','The app uses only what is saved on this phone. Reports, verifications and chat messages wait and send when you switch offline mode off.']
+    :navigator.onLine?['on','You have signal',offAt?`Offline data saved ${stamp(offAt)}. Update it before each trip.`:'Save the park now, before you drive into areas without signal.']
+    :['off','No signal','Everything with a tick below works without signal. Reports wait on the phone and send by themselves when signal returns.'];
+  const nodes=[el('div',{class:'offstate '+state[0]},el('b',{text:state[1]}),el('small',{text:state[2]})),
+    el('button',{class:'primary green',type:'button',disabled:offlineMode()?'':null,onclick:downloadOffline,text:offAt?'⬇️ Update offline data':'⬇️ Download everything for offline'}),
+    el('p',{class:'fine',id:'offProg',text:offlineMode()?'Downloading needs signal.':offAt&&Date.now()-offAt<3600e3?`✅ Saved ${stamp(offAt)}. The park map works without signal.`:'About 5 MB: the app, maps, official park map, animal photos and the 7-day forecast.'}),
+    el('label',{class:'toggle',for:'set-offline'},'Offline mode (saves data and battery)',tg),
+    el('p',{class:'lbl',text:'Saved on this phone'}),
+    row(st.app?true:false,'Park map, roads and routing',st.app?'The map, junction stones, routes and spoken directions work without signal.':'Not saved yet.'),
+    row(st.offTotal&&st.official>=st.offTotal?true:st.official?null:false,'Official park map',`${st.official||0} of ${st.offTotal||'–'} parts saved.`),
+    row(st.photos>=SP.filter(x=>x.wiki).length-2?true:st.photos?null:false,'Animal guide and photos',`${st.photos||0} of ${SP.filter(x=>x.wiki).length} photos. Facts and safety advice are always on the phone.`),
+    row(S.wx&&S.wx.v===2?(Date.now()-S.wx.fetched<12*3600e3?true:null):false,'Weather forecast',S.wx?`7-day forecast from ${stamp(S.wx.fetched)}.`:'Not saved yet.'),
+    row(S.fs?(S.lastSync?(Date.now()-S.lastSync<6*3600e3?true:null):false):null,'Sightings and road reports',S.fs?`${S.lastSync?`Last update ${stamp(S.lastSync)}.`:'Not loaded yet.'}${pend?` ${pend} of yours waiting to send.`:''}`:'Kept on this phone only (no shared database).'),
+    row(true,'Emergency numbers and SOS','Built in. Calls and SMS use the phone network and often work where mobile data does not.'),
+    row(st.sat?null:false,'Satellite images',`${st.sat||0} pieces from areas you have looked at. Satellite images cannot be downloaded in advance; the park map and the official map cover the whole park.`),
+    el('p',{class:'fine',text:st.used!=null?`Using ${(st.used/1048576).toFixed(1)} MB on this phone${st.persist?', protected from automatic clean-up':''}.`:''})];
+  openSheet('Offline',nodes,{view:'offline'});
+}
+async function downloadOffline(){
+  if(offlineMode()){toast('Downloading needs signal.');return;}
+  const say_=t=>{const p=$('offProg');if(p)p.textContent=t;};
+  try{if(navigator.storage&&navigator.storage.persist)await navigator.storage.persist();}catch(e){}
+  say_('Getting ready…');
+  const core=['./','index.html','app.css','app.js','config.js','species.js','emergency.js','manifest.webmanifest','data/board.json','data/osm.json','data/official.json','icons/icon-192.png','icons/icon-512.png'];
+  const off=[];try{const j=await getJSON('data/official/index.json');off.push('data/official/park-map-2020.webp');for(const z in j.tiles)for(const [x,y] of j.tiles[z])off.push(`data/official/${z}/${x}/${y}.webp`);}catch(e){}
+  say_('Finding animal photos…');await loadPhotos();
+  const jobs=[...core.map(u=>[u,{cache:'no-cache'}]),...off.map(u=>[u,{}]),...Object.values(PH.url).map(u=>[u,{mode:'no-cors'}])];
+  let done=0,fail=0;const total=jobs.length+1;
+  for(let i=0;i<jobs.length;i+=6){await Promise.all(jobs.slice(i,i+6).map(([u,o])=>fetch(u,o).then(r=>{if(!r.ok&&r.type!=='opaque')fail++;}).catch(()=>{fail++;}).finally(()=>{done++;})));say_(`Saving… ${Math.round(done/total*100)}%`);}
+  say_('Saving the weather forecast…');await loadWeather(true);
+  LS.set('offlineAt',Date.now());
+  say_(fail?`Saved, but ${fail} files did not download. Try again with better signal.`:'✅ Saved. The park map works without signal now.');
+  toast(fail?`Offline data saved, ${fail} files missing.`:'✅ Offline data saved.');setTimeout(()=>{if(sheetView==='offline')openOffline();},1200);
+}
+function offerOffline(){
+  if(offlineMode()||LS.get('offlineAt',0)>Date.now()-7*864e5||LS.get('offerOff',0)>Date.now()-2*864e5)return;
+  setTimeout(()=>{if(!$('banner').hidden||offlineMode())return;LS.set('offerOff',Date.now());
+    banner('📥 Save the park for areas without signal (about 5 MB).','Save',()=>{hideBanner();openOffline();setTimeout(downloadOffline,300);});
+    setTimeout(()=>{const b=$('banner');if(b&&!b.hidden&&b.textContent.includes('without signal'))hideBanner();},20000);},7000);
+}
+
 function saveSet(){LS.set('settings',S.set);}
 /* ---------- map layers ---------- */
 const LAYERS=[
@@ -1996,7 +2158,7 @@ function checkNear(force){
 function openSettings(){
   const tog=(key,label)=>{const i=el('input',{type:'checkbox',id:'set-'+key});i.checked=!!S.set[key];i.onchange=()=>{S.set[key]=i.checked;saveSet();if(key==='sat')setSat(i.checked);if(key==='nearAlert')checkNear(true);if(key==='closedOk'){buildGraph();toast(i.checked?'Routes may now use tracks marked closed. Check with a ranger first.':'Routes avoid tracks marked closed again.');}if(key==='officialOk'){buildGraph();toast(i.checked?'Routes use tracks on the official park map again.':'Routes avoid tracks that OpenStreetMap marks closed.');}redraw();};return el('label',{class:'toggle',for:'set-'+key},label,i);};
   const cfg=window.AKAGERA_FIREBASE;
-  const nodes=[el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help'}),el('button',{class:'secondary',type:'button',onclick:openMyCar,text:'🚙 My vehicle and avatar'}),tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('nearAlert','Alert me near other drivers\' sightings'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),tog('officialOk','Use tracks the official park map shows, even if OpenStreetMap marks them closed (amber dashed)'),tog('closedOk','Allow routes on all tracks marked closed (red dashed)'),
+  const nodes=[el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help'}),el('button',{class:'secondary',type:'button',onclick:openMyCar,text:'🚙 My vehicle and avatar'}),el('button',{class:'secondary',type:'button',onclick:openOffline,text:S.set.offline?'📴 Offline mode is on · downloads':'📶 Offline use and downloads'}),tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('nearAlert','Alert me near other drivers\' sightings'),tog('wxAlerts','Warn me about storms and heavy rain'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),tog('officialOk','Use tracks the official park map shows, even if OpenStreetMap marks them closed (amber dashed)'),tog('closedOk','Allow routes on all tracks marked closed (red dashed)'),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();if(S.sim){stopSim();toast('Demo drive stopped.');}else{if(!S.route){toast('Pick a destination with Go first.');return;}startNav();startSim();}},text:S.sim?'Stop demo drive':'Demo drive along the planned route'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();startPick('me');},text:'Set my position by hand'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{S.set.hideEx=!S.set.hideEx;saveSet();closeSheet();redraw();},text:S.set.hideEx?'Show example reports':'Hide example reports'}),
@@ -2006,7 +2168,7 @@ function openSettings(){
     el('p',{class:'fine',text:'Junction stones, ranger posts and fence houses: from the park board, accurate to about 1 km. Satellite: Esri World Imagery. Weather: Open-Meteo.'})];
   openSheet('Settings',nodes,{view:'settings'});
 }
-$('setBtn').onclick=openSettings;$('meBtn').onclick=()=>openPass();$('chatBtn').onclick=()=>passValid()?openChat('park'):(passExists()?showPass():openPass());$('syncPill').onclick=openSettings;
+$('setBtn').onclick=openSettings;$('meBtn').onclick=()=>openPass();$('chatBtn').onclick=()=>passValid()?openChat('park'):(passExists()?showPass():openPass());$('syncPill').onclick=openOffline;
 $('reportBtn').onclick=()=>startReport();$('findBtn').onclick=()=>openFind();$('goBtn').onclick=openGo;
 
 /* =========================================================================
@@ -2024,11 +2186,13 @@ async function boot(){
   startGPS();loadWeather();initSharing();loadPhotos();setTimeout(socTick,2500);setTimeout(lbHandleLink,1200);
   window.addEventListener('online',loadPhotos);
   setInterval(()=>{loadWeather();redraw();updateGpsLine();socTick();},60e3);
-  window.addEventListener('online',()=>loadWeather(true));
+  window.addEventListener('online',()=>{loadWeather(true);setSync();});window.addEventListener('offline',()=>{setSync();updateWxPill();});
+  setInterval(checkWxAlerts,10*60e3);setTimeout(offerOffline,1500);
+  if(S.set.offline)caches.open('akl-ext').then(c=>c.put(OFFLINE_FLAG,new Response('1'))).catch(()=>{});
   // follow GPS in browse mode
   setInterval(()=>{if(!S.nav&&S.follow){const p=myPos();if(p&&p.gps){cam.cx=p.x;cam.cy=p.y;redraw();}}},1000);
-  if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
+  if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))navigator.serviceWorker.register('sw.js').catch(()=>{});
   if(!S.set.hideEx&&allReports().some(r=>r.example))banner('No live reports yet. Pins marked EXAMPLE are samples.','Hide',()=>{S.set.hideEx=true;saveSet();hideBanner();redraw();},'ex');
-  window.AKL=S;window.AKLf={openParkMap,drawOfficial,paintVehicle,paintAvatar,carSet,openMyCar,saveCar,lbPublish,myStats,lbSorted,LB,previewRoute,centerOn,route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
+  window.AKL=S;window.AKLf={openOffline,downloadOffline,setOfflineMode,openWeather,loadWeather,wxHere,openParkMap,drawOfficial,paintVehicle,paintAvatar,carSet,openMyCar,saveCar,lbPublish,myStats,lbSorted,LB,previewRoute,centerOn,route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
 }
 boot();
