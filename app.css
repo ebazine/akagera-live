@@ -448,3 +448,7 @@ a.secondary{display:flex;align-items:center;justify-content:center;text-decorati
 .car3d{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
 
 .grmem{display:flex;align-items:center;gap:12px;padding:8px 4px}.grmem .em{font-size:26px;width:34px;text-align:center}.grmem b{display:block}.grmem small{display:block;color:var(--muted,#6b7177);font-size:13px}
+
+.coffee{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:0 16px;border-radius:14px;background:#FFDD00;color:#1b1b1b;font-weight:700;text-decoration:none;border:1px solid rgba(0,0,0,.12)}
+.coffee.small{min-height:40px;font-size:14px}
+.coffee:active{filter:brightness(.95)}

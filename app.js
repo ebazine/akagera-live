@@ -2647,6 +2647,8 @@ function checkNear(force){
   if(NEAR.id!==r.id){NEAR.id=r.id;if(!NEAR.spoken[r.id]){NEAR.spoken[r.id]=now;LS.set('nearSpoken',NEAR.spoken);
     say(`${label(r)} reported ${Math.round(d/10)*10} metres ${where}. Tap I see it to verify.`);try{navigator.vibrate&&navigator.vibrate([120,60,120]);}catch(e){}}}
 }
+const COFFEE_URL='https://buymeacoffee.com/eliesbazine';
+function coffeeLink(cls){return el('a',{class:'coffee'+(cls?' '+cls:''),href:COFFEE_URL,target:'_blank',rel:'noopener',text:'☕ Buy me a coffee'});}
 function openSettings(){
   const tog=(key,label)=>{const i=el('input',{type:'checkbox',id:'set-'+key});i.checked=!!S.set[key];i.onchange=()=>{S.set[key]=i.checked;saveSet();if(key==='sat')setSat(i.checked);if(key==='nearAlert')checkNear(true);if(key==='closedOk'){buildGraph();toast(i.checked?'Routes may now use tracks marked closed. Check with a ranger first.':'Routes avoid tracks marked closed again.');}if(key==='officialOk'){buildGraph();toast(i.checked?'Routes use tracks on the official park map again.':'Routes avoid tracks that OpenStreetMap marks closed.');}redraw();};return el('label',{class:'toggle',for:'set-'+key},label,i);};
   const cfg=window.AKAGERA_FIREBASE;
@@ -2654,6 +2656,7 @@ function openSettings(){
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();if(S.sim){stopSim();toast('Demo drive stopped.');}else{if(!S.route){toast('Pick a destination with Go first.');return;}startNav();startSim();}},text:S.sim?'Stop demo drive':'Demo drive along the planned route'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();startPick('me');},text:'Set my position by hand'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{S.set.hideEx=!S.set.hideEx;saveSet();closeSheet();redraw();},text:S.set.hideEx?'Show example reports':'Hide example reports'}),
+    el('p',{class:'lbl',text:'Support the app'}),el('p',{class:'fine',text:'Akagera Live is free. If it helped your game drive, you can say thanks with a coffee.'}),coffeeLink(),
     el('p',{class:'lbl',text:'About the data'}),
     el('p',{class:'fine',text:`Sharing: ${cfg&&cfg.apiKey?'Firebase project '+cfg.projectId+' ('+S.sync+')':'not set up yet, so reports stay on this phone.'}`}),
     el('p',{class:'fine',text:S.layers.osm?`Roads and lakes: OpenStreetMap contributors, updated ${S.osm.meta.generated}.`:'Roads: traced from the park entrance board (detailed OpenStreetMap roads not loaded yet).'}),
