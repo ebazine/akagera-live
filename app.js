@@ -2062,8 +2062,13 @@ async function offlineStatus(){
   try{const e=await navigator.storage.estimate();st.used=e.usage;st.persist=navigator.storage.persisted?await navigator.storage.persisted():false;}catch(e){}
   return st;
 }
-async function openOffline(){
-  const st=await offlineStatus(),pend=allReports().filter(r=>r.pending).length,offAt=LS.get('offlineAt',0);
+const tmo=(p,ms)=>Promise.race([Promise.resolve(p),new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))]);
+let OFFBUSY=false;
+async function openOffline(known){
+  let st=known&&known.__st?known:null;
+  if(!st){const p=offlineStatus().then(x=>Object.assign(x,{__st:1}));st=await Promise.race([p,new Promise(r=>setTimeout(()=>r(null),1200))]);
+    if(!st){st={__st:1};p.then(x=>{if(sheetView==='offline'&&!OFFBUSY)openOffline(x);}).catch(()=>{});}}   // slow lookup: show the sheet now, fill it in when ready
+  const pend=allReports().filter(r=>r.pending).length,offAt=LS.get('offlineAt',0);
   const row=(ok,title,detail)=>el('div',{class:'offrow '+(ok===true?'ok':ok===false?'no':'part')},el('span',{class:'oi',text:ok===true?'✓':ok===false?'–':'◐'}),el('div',null,el('b',{text:title}),el('small',{text:detail})));
   const tg=el('input',{type:'checkbox',id:'set-offline'});tg.checked=!!S.set.offline;
   tg.onchange=async()=>{await setOfflineMode(tg.checked);toast(tg.checked?'Offline mode: only what is saved on this phone is used. Reports wait and send when you switch it off.':'Offline mode is off. Waiting reports are sending.');openOffline();};
@@ -2071,8 +2076,8 @@ async function openOffline(){
     :navigator.onLine?['on','You have signal',offAt?`Offline data saved ${stamp(offAt)}. Update it before each trip.`:'Save the park now, before you drive into areas without signal.']
     :['off','No signal','Everything with a tick below works without signal. Reports wait on the phone and send by themselves when signal returns.'];
   const nodes=[el('div',{class:'offstate '+state[0]},el('b',{text:state[1]}),el('small',{text:state[2]})),
-    el('button',{class:'primary green',type:'button',disabled:offlineMode()?'':null,onclick:downloadOffline,text:offAt?'⬇️ Update offline data':'⬇️ Download everything for offline'}),
-    el('p',{class:'fine',id:'offProg',text:offlineMode()?'Downloading needs signal.':offAt&&Date.now()-offAt<3600e3?`✅ Saved ${stamp(offAt)}. The park map works without signal.`:'About 5 MB: the app, maps, official park map, animal photos and the 7-day forecast.'}),
+    el('button',{class:'primary green',type:'button',id:'offDl',disabled:OFFBUSY?'':null,onclick:()=>downloadOffline(),text:OFFBUSY?'Saving…':(offlineMode()?'⬇️ Switch off offline mode and download':offAt?'⬇️ Update offline data':'⬇️ Download everything for offline')}),
+    el('p',{class:'fine',id:'offProg',text:offlineMode()?'Offline mode is on, so nothing is downloaded. The button below switches it off first.':offAt&&Date.now()-offAt<3600e3?`✅ Saved ${stamp(offAt)}. The park map works without signal.`:'About 5 MB: the app, maps, official park map, animal photos and the 7-day forecast.'}),
     el('label',{class:'toggle',for:'set-offline'},'Offline mode (saves data and battery)',tg),
     el('p',{class:'lbl',text:'Saved on this phone'}),
     row(st.app?true:false,'Park map, roads and routing',st.app?'The map, junction stones, routes and spoken directions work without signal.':'Not saved yet.'),
@@ -2086,20 +2091,27 @@ async function openOffline(){
   openSheet('Offline',nodes,{view:'offline'});
 }
 async function downloadOffline(){
-  if(offlineMode()){toast('Downloading needs signal.');return;}
-  const say_=t=>{const p=$('offProg');if(p)p.textContent=t;};
-  try{if(navigator.storage&&navigator.storage.persist)await navigator.storage.persist();}catch(e){}
-  say_('Getting ready…');
-  const core=['./','index.html','app.css','app.js','config.js','species.js','emergency.js','manifest.webmanifest','data/board.json','data/osm.json','data/official.json','icons/icon-192.png','icons/icon-512.png','icons/apple-touch-icon.png','icons/favicon.svg','lib/qrcode.js'];
-  const off=[];try{const j=await getJSON('data/official/index.json');off.push('data/official/park-map-2020.webp');for(const z in j.tiles)for(const [x,y] of j.tiles[z])off.push(`data/official/${z}/${x}/${y}.webp`);}catch(e){}
-  say_('Finding animal photos…');await loadPhotos();
-  const jobs=[...core.map(u=>[u,{cache:'no-cache'}]),...off.map(u=>[u,{}]),...Object.values(PH.url).map(u=>[u,{mode:'no-cors'}])];
-  let done=0,fail=0;const total=jobs.length+1;
-  for(let i=0;i<jobs.length;i+=6){await Promise.all(jobs.slice(i,i+6).map(([u,o])=>fetch(u,o).then(r=>{if(!r.ok&&r.type!=='opaque')fail++;}).catch(()=>{fail++;}).finally(()=>{done++;})));say_(`Saving… ${Math.round(done/total*100)}%`);}
-  say_('Saving the weather forecast…');await loadWeather(true);
-  LS.set('offlineAt',Date.now());
-  say_(fail?`Saved, but ${fail} files did not download. Try again with better signal.`:'✅ Saved. The park map works without signal now.');
-  toast(fail?`Offline data saved, ${fail} files missing.`:'✅ Offline data saved.');setTimeout(()=>{if(sheetView==='offline')openOffline();},1200);
+  if(OFFBUSY)return;
+  const say_=t=>{const p=$('offProg');if(p)p.textContent=t;const b=$('offDl');if(b){b.disabled=true;b.textContent=t.length<28?t:'Saving…';}};
+  OFFBUSY=true;say_('Getting ready…');
+  try{
+    if(offlineMode()){await setOfflineMode(false);say_('Getting ready…');}
+    if(!navigator.onLine){toast('No signal right now. Try again when you have signal.');OFFBUSY=false;if(sheetView==='offline')openOffline();return;}
+    try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});}catch(e){}   // not awaited: some phones wait for a prompt
+    const core=['./','index.html','app.css','app.js','config.js','species.js','emergency.js','manifest.webmanifest','data/board.json','data/osm.json','data/official.json','icons/icon-192.png','icons/icon-512.png','icons/apple-touch-icon.png','icons/favicon.svg','lib/qrcode.js'];
+    const off=[];try{const j=await tmo(getJSON('data/official/index.json'),8000);off.push('data/official/park-map-2020.webp');for(const z in j.tiles)for(const [x,y] of j.tiles[z])off.push(`data/official/${z}/${x}/${y}.webp`);}catch(e){}
+    say_('Finding animal photos…');try{await tmo(loadPhotos(),8000);}catch(e){}
+    const jobs=[...core.map(u=>[u,{cache:'no-cache'}]),...off.map(u=>[u,{}]),...Object.values(PH.url).map(u=>[u,{mode:'no-cors'}])];
+    let done=0,fail=0;const total=jobs.length+1;
+    const get=(u,o)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),25000);return fetch(u,{...o,signal:c.signal}).then(r=>{if(!r.ok&&r.type!=='opaque')fail++;}).catch(()=>{fail++;}).finally(()=>{clearTimeout(t);done++;});};
+    for(let i=0;i<jobs.length;i+=6){await Promise.all(jobs.slice(i,i+6).map(([u,o])=>get(u,o)));say_(`Saving… ${Math.round(done/total*100)}%`);}
+    say_('Saving the weather forecast…');try{await tmo(loadWeather(true),10000);}catch(e){}
+    LS.set('offlineAt',Date.now());
+    toast(fail?`Offline data saved, ${fail} files missing.`:'✅ Offline data saved.');
+    OFFBUSY=false;if(sheetView==='offline')await openOffline();
+    const pr=$('offProg');if(pr)pr.textContent=fail?`Saved, but ${fail} files did not download. Try again with better signal.`:'✅ Saved. The park map works without signal now.';
+  }catch(e){OFFBUSY=false;toast('Could not save everything. Try again with better signal.');if(sheetView==='offline')openOffline();}
+  OFFBUSY=false;
 }
 function offerOffline(){
   if(offlineMode()||LS.get('offlineAt',0)>Date.now()-7*864e5||LS.get('offerOff',0)>Date.now()-2*864e5)return;
