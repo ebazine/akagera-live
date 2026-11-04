@@ -181,6 +181,27 @@ service cloud.firestore {
           && request.resource.data.expiresAt is timestamp && request.resource.data.expiresAt < request.time + duration.value(31, 'd');
         allow delete: if signedIn() && (resource.data.uid == request.auth.uid || resource.data.expiresAt < request.time);
       }
+      // Live positions shared with the group (one document per member, overwritten, kept 30 minutes)
+      match /pos/{uid} {
+        allow read: if isMember(code);
+        allow create, update: if isMember(code) && uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['name','emoji','vehicle','type','color','lat','lon','hd','sp','acc','at','expiresAt'])
+          && request.resource.data.lat is number && request.resource.data.lat > -2.3 && request.resource.data.lat < -1.2
+          && request.resource.data.lon is number && request.resource.data.lon > 30.3 && request.resource.data.lon < 31.0
+          && request.resource.data.expiresAt is timestamp && request.resource.data.expiresAt < request.time + duration.value(1, 'h');
+        allow delete: if signedIn() && (uid == request.auth.uid || resource.data.expiresAt < request.time);
+      }
+    }
+    // Anonymous traffic for oncoming-vehicle warnings (separate daily sign-in, no names, kept 5 minutes)
+    match /traffic/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && id == request.auth.uid
+        && request.resource.data.keys().hasOnly(['c','lat','lon','hd','sp','at','expiresAt'])
+        && request.resource.data.c is string && request.resource.data.c.size() <= 16
+        && request.resource.data.lat is number && request.resource.data.lat > -2.3 && request.resource.data.lat < -1.2
+        && request.resource.data.lon is number && request.resource.data.lon > 30.3 && request.resource.data.lon < 31.0
+        && request.resource.data.expiresAt is timestamp && request.resource.data.expiresAt < request.time + duration.value(10, 'm');
+      allow delete: if signedIn() && (id == request.auth.uid || resource.data.expiresAt < request.time);
     }
   }
 }
@@ -194,6 +215,7 @@ A **trip pass** is a temporary driver profile: a name or nickname, the vehicle (
 
 - **Park chat** for everyone with a pass who opted in. Messages last 24 hours. Quick replies ("Still there?", "On my way") and one-tap sharing of a sighting as a card others can open or navigate to.
 - **Groups with chat.** Chat → *Groups* → *＋ New group*: give it a name and you get a 6-character code, a QR code and an invite link (`?join=CODE`) to share by WhatsApp, SMS or any app. Opening the link (or scanning the QR code) joins the group in one tap. Each group has its own chat (messages last 30 days), its own leaderboard, and one-tap sharing of a sighting or your whole trip plan. Up to 8 groups per phone, 60 members per group. Old leaderboard group codes keep working.
+- **Live positions and traffic.** Settings → *Live positions and traffic* (or 📡 in a group chat). *Share with a group*: members see your vehicle, avatar and name on the map and while driving, and can tap it to drive to you or message you. *Traffic*: share anonymously while moving and get a spoken warning when another Reba vehicle is coming towards you on your road (on your route when navigating), on all roads or narrow tracks only. Positions are kept a few minutes with no history; sharing stops at 19:00 (or 2 hours after turning it on in the evening), pauses outside the park and when the app is not on screen; traffic uses a separate anonymous sign-in renewed daily. Optional: in the Firebase console add TTL policies on `expiresAt` for the `pos` and `traffic` collections so old entries are removed automatically.
 - **Private messages** between two drivers, deleted after 4 days. Any driver can be blocked on your phone.
 - **Driving lock:** typing is paused above 10 km/h unless you confirm you are a passenger. Quick replies still work.
 - Reports show "Reported by Elies · White Toyota Prado" while the pass is active (can be switched off); afterwards the name disappears.

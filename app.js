@@ -493,7 +493,7 @@ async function initSharing(){
     const F=await import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`);
     const app=A.initializeApp(cfg);
     let db;try{db=F.initializeFirestore(app,{localCache:F.persistentLocalCache({tabManager:F.persistentMultipleTabManager()})});}catch(e){db=F.getFirestore(app);}
-    S.fs={F,db,uid:null};if(S.set.offline)F.disableNetwork(db).catch(()=>{});
+    S.fs={F,db,uid:null,A,cfg};if(S.set.offline)F.disableNetwork(db).catch(()=>{});
     S.fs.authReady=import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`).then(AU=>{const auth=AU.getAuth(app);S.fs.AU=AU;S.fs.auth=auth;
       AU.onAuthStateChanged(auth,u=>{S.fs.uid=u?u.uid:null;if(u&&passValid())startSocial();else if(!u){endSocial();grStop();}if(u){setTimeout(socTick,1500);grStart();}});}).catch(()=>{});
     const q=F.query(F.collection(db,'reports'),F.where('at','>',Date.now()-14*864e5),F.orderBy('at','desc'),F.limit(600));
@@ -607,10 +607,11 @@ function onFix(c,sim){
   const g=S.gps;const [x,y]=merc(c.longitude,c.latitude);
   let heading=(c.heading!=null&&!isNaN(c.heading)&&(c.speed||0)>1.5)?c.heading:null;
   if(heading==null&&lastFix){const d=gd(lastFix.x,lastFix.y,x,y);if(d>8)heading=brg(lastFix.x,lastFix.y,x,y);else heading=g.heading;}
-  if(!lastFix||gd(lastFix.x,lastFix.y,x,y)>8)lastFix={x,y};
-  Object.assign(g,{ok:true,denied:false,x,y,lat:c.latitude,lon:c.longitude,acc:c.accuracy||20,heading,speed:c.speed!=null&&!isNaN(c.speed)?c.speed:g.speed,t:Date.now(),sim:!!sim});
+  let spd=c.speed!=null&&!isNaN(c.speed)?c.speed:null;if(spd==null&&lastFix&&lastFix.t){const dt=(Date.now()-lastFix.t)/1000,dd=gd(lastFix.x,lastFix.y,x,y);spd=dt>0.5&&dt<30?(dd>8?dd/dt:0):g.speed;}
+  if(!lastFix||gd(lastFix.x,lastFix.y,x,y)>8||Date.now()-(lastFix.t||0)>20e3)lastFix={x,y,t:Date.now()};
+  Object.assign(g,{ok:true,denied:false,x,y,lat:c.latitude,lon:c.longitude,acc:c.accuracy||20,heading,speed:spd!=null?spd:g.speed,t:Date.now(),sim:!!sim});
   if(S.nav)navUpdate();
-  updateSpeed();updateGpsLine();checkNear();redraw();
+  updateSpeed();updateGpsLine();checkNear();if(typeof checkOncoming==='function'&&(liveActive()||LV.trf.length||Object.keys(LV.grp).length))checkOncoming();redraw();
 }
 let lastSpeedWarn=0;
 function updateSpeed(){
@@ -629,6 +630,7 @@ function updateGpsLine(){
   if(!p){b.replaceChildren(S.gps.denied?el('span',null,el('b',{text:'Location is blocked. '}),'Allow it in your browser settings, or tap here to set your position.'):el('span',null,el('b',{text:'Waiting for GPS… '}),'Tap here to set your position by hand.'));return;}
   const where=whereText(p.x,p.y,true);const out=p.gps?outsideBy(p):0;
   b.replaceChildren(el('b',{text:p.gps?(S.gps.sim?'Demo drive: ':`GPS ±${Math.round(S.gps.acc)} m: `):'Set by hand: '}),where,out>2000?el('span',{text:' · tap to set a spot in the park'}):'');
+  if(typeof syncBottom==='function')syncBottom();
 }
 function whereText(x,y,short){
   if(!inRing(x,y,S.park)){let best=1e18;for(const q of S.park){const d=gd(x,y,q[0],q[1]);if(d<best)best=d;}if(best>2000)return `${fmtD(best)} outside the park`;}
@@ -944,6 +946,7 @@ function draw(){
   if(pickPin){const q=merc(pickPin.lon,pickPin.lat);const [x,y]=w2s(q[0],q[1],m);drawFlag(x,y,'#E35F14');}
   reps.sort((a,b)=>(a.r===selected)-(b.r===selected)||a.y-b.y);
   for(const o of reps){drawReport(o.r,o.x,o.y,o.r===selected);hits.unshift({t:'rep',r:o.r,x:o.x,y:o.y,r2:26});}
+  if(LY('vehicles'))for(const v of liveVehicles()){const [vx,vy]=w2s(v.x,v.y,m);if(vx<-40||vy<-40||vx>W+40||vy>H+40)continue;drawOther(vx,vy,v.hd!=null?v.hd*RAD+cam.rot:null,v);hits.unshift({t:'veh',v,x:vx,y:vy-6,r:24});}
   const want3d=!!(pos&&S.nav&&S.set.tilt&&S.set.car3d!==false);
   if(pos){const h=pos.heading!=null?(pos.heading*RAD+cam.rot):null;if(want3d)draw3D(posS[0],posS[1],h||0,pos.gps);else drawCar(posS[0],posS[1],h,pos.gps);hits.unshift({t:'me',x:posS[0],y:posS[1]-12,r:32});}
   if(!want3d)clear3D();
@@ -990,6 +993,7 @@ function onTap(x,y){
     if(k==='me'){setManual(u.lat,u.lon,'Position set by hand.');}
     else if(k==='dest'){previewRoute({x:wx,y:wy,name:'Dropped pin'});}
     redraw();return;}
+  for(const h of hits)if(h.t==='veh'&&Math.hypot(h.x-x,h.y-y)<h.r){openVehicle(h.v);return;}
   for(const h of hits)if(h.t==='rep'&&Math.hypot(h.x-x,h.y-y)<h.r2){openReportView(h.r);return;}
   for(const h of hits)if(h.t==='me'&&Math.hypot(h.x-x,h.y-y)<h.r){openMyCar();return;}
   for(const h of hits)if(h.t==='poi'&&Math.hypot(h.x-x,h.y-y)<h.r){openPoi(h.p);return;}
@@ -1323,7 +1327,7 @@ async function keepAwake(){try{if(S.set.wake&&'wakeLock' in navigator)wakeLock=a
 document.addEventListener('visibilitychange',()=>{if(S.nav&&document.visibilityState==='visible')keepAwake();});
 function say(t){if(!S.set.voice||!('speechSynthesis' in window))return;try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-GB';u.rate=1;speechSynthesis.speak(u);}catch(e){}}
 function startNav(){
-  if(!S.route)return;closeSheet();
+  if(!S.route)return;closeSheet();hideTrafWarn();
   S.nav={prog:0,seg:1,off:0,next:null,spoken:{},started:Date.now()};
   document.body.classList.add('navmode');$('tiltbox').classList.toggle('tilt',S.set.tilt);
   ['navTop','navBottom','speedBox'].forEach(i=>$(i).hidden=false);updateSpeed();
@@ -1332,7 +1336,7 @@ function startNav(){
   setTimeout(()=>{resize();navUpdate();requestAnimationFrame(draw);},60);
 }
 function endNav(arrived){
-  stopSim();S.nav=null;anim=false;document.body.classList.remove('navmode');$('tiltbox').classList.remove('tilt');
+  hideTrafWarn();stopSim();S.nav=null;anim=false;document.body.classList.remove('navmode');$('tiltbox').classList.remove('tilt');
   ['navTop','navBottom','speedBox','navThen','navWarn'].forEach(i=>$(i).hidden=true);updateSpeed();
   try{wakeLock&&wakeLock.release();}catch(e){}wakeLock=null;
   if(!arrived)S.route=null;
@@ -2368,6 +2372,7 @@ async function grJoin(code,o={}){
   finally{delete GR.joining[code];}
 }
 async function grLeave(code){
+  if(LIVE.groups[code]){liveDropGroup(code,true);delete LIVE.groups[code];liveSave();}
   try{const {F,db}=S.fs,uid=S.fs.uid;if(uid)await F.updateDoc(F.doc(db,'groups',code),{members:F.arrayRemove(uid),['people.'+uid]:F.deleteField()});}catch(e){}
   GR.codes=GR.codes.filter(g=>g.code!==code);delete GR.list[code];delete GR.last[code];if(GR.subs[code]){GR.subs[code]();delete GR.subs[code];}
   if(LB.scope===code)LB.scope='park';grSave();updateChatBadge();toast(`You left ${grName(code)}.`);
@@ -2434,7 +2439,7 @@ function openGroupChat(code){
   const list=el('div',{class:'msgs',role:'log','aria-live':'polite'});
   const cnt=()=>{const n=Math.max(1,((GR.list[code]||g).members||[]).length);return `${n} member${n===1?'':'s'} · code ${fmtCode(code)}`;},sub=el('small',{text:cnt()});
   const head=el('div',{class:'grhead'},el('div',null,el('b',{text:g.name}),sub),
-    el('button',{type:'button',class:'plmini',onclick:()=>openInvite(code),text:'➕ Invite'}),el('button',{type:'button',class:'plmini',onclick:()=>openGroupInfo(code),'aria-label':'Group details',text:'ⓘ'}));
+    el('button',{type:'button',class:'plmini',onclick:()=>openLive(),'aria-label':'Live positions',text:LIVE.groups[code]&&liveActive()?'📡 On':'📡'}),el('button',{type:'button',class:'plmini',onclick:()=>openInvite(code),text:'➕ Invite'}),el('button',{type:'button',class:'plmini',onclick:()=>openGroupInfo(code),'aria-label':'Group details',text:'ⓘ'}));
   GR.render=()=>{sub.textContent=cnt();const atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<80;const ms=GR.msgs[code]||[];
     list.replaceChildren(...(ms.length?ms.map(m=>msgNode(m,S.fs.uid)):[el('p',{class:'empty',text:`Welcome to ${g.name}. Say hello, share a sighting or send your trip plan. Messages stay for ${GR_DAYS} days.`})]));
     if(atBottom||!list.dataset.init){list.scrollTop=list.scrollHeight;list.dataset.init='1';}
@@ -2449,6 +2454,7 @@ function openGroupInfo(code){
   const ppl=Object.entries(g.people||{}).filter(([k])=>g.members.includes(k)).sort((a,b)=>(a[0]===uid?-1:b[0]===uid?1:String(a[1].n).localeCompare(String(b[1].n))));
   openSheet(g.name,[el('div',{class:'grhead'},el('div',null,el('b',{text:g.name}),el('small',{text:`${g.members.length} member${g.members.length===1?'':'s'} · code ${fmtCode(code)}`}))),
     el('button',{class:'primary green',type:'button',onclick:()=>openInvite(code),text:'➕ Invite people'}),
+    el('button',{class:'secondary',type:'button',onclick:()=>liveSet('group',code,!(LIVE.groups[code]&&liveActive())),text:LIVE.groups[code]&&liveActive()?'📡 Stop sharing my position here':'📡 Share my live position with this group'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{LB.scope=code;findTab='board';if(LB.joined){lbListen();openBoard();}else openFind('board');},text:'🏆 Group leaderboard'}),
     el('p',{class:'lbl',text:'Members'}),el('ul',{class:'list grmems'},...ppl.map(([k,p])=>el('li',null,el('div',{class:'grmem'},el('span',{class:'em',text:AVATARS.includes(p.e)?p.e:'🙂'}),el('span',null,el('b',{text:String(p.n||'Guest').slice(0,24)+(k===uid?' (you)':'')}),k===g.by?el('small',{text:'Started the group'}):null))))),
     el('button',{class:'secondary no',type:'button',onclick:()=>openSheet('Leave this group?',[el('p',{class:'hint',text:`You will stop getting messages from ${g.name}. You can join again with the code.`}),
@@ -2468,6 +2474,191 @@ function sendPlanToGroup(){
   openSheet('Send the plan to a group',[el('ul',{class:'list'},...GR.codes.map(g=>el('li',null,el('button',{type:'button',onclick:()=>{sendGroup(g.code,t,null,'plan');toast(`Plan sent to ${g.name}.`,'Open',()=>openGroupChat(g.code));openPlanner(true);}},el('span',{class:'em',text:'👥'}),el('span',null,el('b',{text:g.name})))))),
     el('button',{class:'secondary',type:'button',onclick:()=>openPlanner(true),text:'Back to the plan'})],{view:'plangroup'});
 }
+
+/* ---------- live positions: named positions for my groups, anonymous traffic for oncoming-vehicle warnings ---------- */
+const LIVE=Object.assign({groups:{},traffic:false,until:0},LS.get('live',{}));
+const LV={grp:{},grpUnsub:{},trf:[],trfUnsub:null,trfCells:'',pubG:{},pubT:null,tfs:null,tinit:null,warned:{},lastWarn:0,stillSince:0,paused:''};
+const LIVE_BOX=[-2.3,-1.2,30.3,31.0];   // lat min, lat max, lon min, lon max: the same box is in the Firestore rules
+const rwDay=()=>new Date(Date.now()+2*3600e3).toISOString().slice(0,10);
+function rwUntil(){const now=Date.now(),d=new Date(now+2*3600e3),t=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),19,0)-2*3600e3;return now<t-30*60e3?t:now+2*3600e3;}   // 19:00 Rwanda time, or 2 hours in the evening
+function liveSave(){LS.set('live',LIVE);}
+const liveGroups=()=>GR.codes.map(g=>g.code).filter(c=>LIVE.groups[c]);
+function liveActive(){return Date.now()<LIVE.until&&(LIVE.traffic||liveGroups().length>0);}
+const cellOf=(lat,lon)=>`${Math.floor(lat/0.04)}_${Math.floor(lon/0.04)}`;
+function cellsAround(lat,lon){const a=Math.floor(lat/0.04),b=Math.floor(lon/0.04),o=[];for(let i=-1;i<=1;i++)for(let j=-1;j<=1;j++)o.push(`${a+i}_${b+j}`);return o;}
+function nearPark(x,y){if(inRing(x,y,S.park))return true;let m=1e9;for(const q of S.park){const d=gd(x,y,q[0],q[1]);if(d<m)m=d;}return m<2500;}
+function livePause(){
+  const g=S.gps;if(!S.fs)return 'the shared database is not set up';if(offlineMode())return 'offline mode is on';if(document.hidden)return 'Reba is not open on screen';
+  if(S.useManual)return 'your position is set by hand';if(!g.ok||Date.now()-g.t>20e3)return 'waiting for GPS';if(g.sim)return 'demo drive (not shared)';
+  if(g.lat<LIVE_BOX[0]||g.lat>LIVE_BOX[1]||g.lon<LIVE_BOX[2]||g.lon>LIVE_BOX[3]||!nearPark(g.x,g.y))return 'you are outside the park';return '';
+}
+/* a second, separate anonymous sign-in for traffic, renewed every day, so traffic positions cannot be linked to your name, groups or trip pass */
+async function trafficFS(){
+  if(LV.tfs)return LV.tfs;if(LV.tinit)return LV.tinit;
+  LV.tinit=(async()=>{const {F,A,cfg}=S.fs;const V='10.12.2';
+    const AU=S.fs.AU||await import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`);
+    let app=null;try{app=A.getApp('reba-traffic');}catch(e){}if(!app)app=A.initializeApp(cfg,'reba-traffic');
+    const db=F.getFirestore(app),auth=AU.getAuth(app);
+    const u=await new Promise(res=>{let off=null;off=AU.onAuthStateChanged(auth,x=>{try{off&&off();}catch(e){}res(x);});});
+    let uid=u&&u.uid;const day=rwDay(),was=LS.get('trDay','');
+    if(uid&&was&&was!==day){try{await F.deleteDoc(F.doc(db,'traffic',uid));}catch(e){}try{await AU.signOut(auth);}catch(e){}uid=null;}
+    if(!uid)uid=(await AU.signInAnonymously(auth)).user.uid;
+    LS.set('trDay',day);LV.tfs={F,db,uid};return LV.tfs;})();
+  LV.tinit.catch(()=>{LV.tinit=null;});return LV.tinit;
+}
+function liveSet(kind,code,on){
+  if(on&&kind==='group'&&!myName()){needName(()=>{liveSet(kind,code,on);openLive();});return;}
+  if(on&&!S.gps.ok)toast('Turn on location for Reba so it can share your position.');
+  if(on&&Date.now()>=LIVE.until){LIVE.until=rwUntil();for(const c in LIVE.groups)if(c!==code)LIVE.groups[c]=false;if(kind!=='traffic')LIVE.traffic=false;}
+  if(kind==='traffic'){LIVE.traffic=on;if(!on)liveDropTraffic(true);}
+  else{if(on)LIVE.groups[code]=true;else{delete LIVE.groups[code];liveDropGroup(code,true);}}
+  liveSave();liveTick();if(sheetView==='live')openLive();
+}
+function liveStopAll(quiet){for(const c in LIVE.groups)liveDropGroup(c,true);liveDropTraffic(true);LIVE.groups={};LIVE.traffic=false;LIVE.until=0;liveSave();liveTick();if(!quiet)toast('Live sharing is off.');if(sheetView==='live')openLive();}
+function liveDropTraffic(force){if(!LV.pubT&&!force)return;LV.pubT=null;const T=LV.tfs;if(T)T.F.deleteDoc(T.F.doc(T.db,'traffic',T.uid)).catch(()=>{});}
+function liveDropGroup(code,force){if(!LV.pubG[code]&&!force)return;delete LV.pubG[code];const f=S.fs;if(f&&f.uid)f.F.deleteDoc(f.F.doc(f.db,'groups',code,'pos',f.uid)).catch(()=>{});}
+function livePublish(){
+  const g=S.gps,now=Date.now();
+  if(!liveActive()){LV.paused='';return;}
+  const why=livePause();LV.paused=why;
+  if(why){liveDropTraffic();return;}
+  const {F,db,uid}=S.fs;if(!uid)return;
+  const hd=g.heading!=null&&!isNaN(g.heading)?Math.round(g.heading):null,sp=Math.round((g.speed||0)*10)/10;
+  const car=carSet();
+  for(const code of liveGroups()){const last=LV.pubG[code],moved=last?gd(last.x,last.y,g.x,g.y):1e9;
+    if(!last||(now-last.t>=20e3&&moved>20)||now-last.t>=120e3){LV.pubG[code]={t:now,x:g.x,y:g.y};
+      F.setDoc(F.doc(db,'groups',code,'pos',uid),{name:myName()||'Guest',emoji:myEmoji(),vehicle:myVehicle(),type:car.type,color:car.color,lat:+g.lat.toFixed(5),lon:+g.lon.toFixed(5),hd,sp,acc:Math.round(g.acc||0),at:now,expiresAt:F.Timestamp.fromMillis(now+30*60e3)}).catch(()=>{});}}
+  if(LIVE.traffic){
+    if((g.speed||0)>=2.5){LV.stillSince=0;const last=LV.pubT,moved=last?gd(last.x,last.y,g.x,g.y):1e9;
+      if(!last||now-last.t>=15e3||moved>200){LV.pubT={t:now,x:g.x,y:g.y};const lat=g.lat,lon=g.lon;
+        trafficFS().then(T=>T.F.setDoc(T.F.doc(T.db,'traffic',T.uid),{c:cellOf(lat,lon),lat:+lat.toFixed(4),lon:+lon.toFixed(4),hd,sp,at:now,expiresAt:T.F.Timestamp.fromMillis(now+5*60e3)})).catch(()=>{LV.pubT=null;});}}
+    else{if(!LV.stillSince)LV.stillSince=now;if(now-LV.stillSince>45e3)liveDropTraffic();}}   // standing still: not shown to other drivers
+}
+const liveOk=(o,now)=>o&&typeof o.at==='number'&&now-o.at<10*60e3&&typeof o.lat==='number'&&typeof o.lon==='number';
+function liveListen(){
+  const f=S.fs,vis=!document.hidden&&f&&f.uid&&!offlineMode();
+  const want=vis?GR.codes.map(g=>g.code):[];
+  for(const c in LV.grpUnsub)if(!want.includes(c)){LV.grpUnsub[c]();delete LV.grpUnsub[c];delete LV.grp[c];}
+  for(const c of want)if(!LV.grpUnsub[c]){
+    LV.grpUnsub[c]=f.F.onSnapshot(f.F.collection(f.db,'groups',c,'pos'),snap=>{const now=Date.now();
+      LV.grp[c]=snap.docs.filter(d=>d.id!==f.uid).map(d=>({...d.data(),id:d.id,code:c,kind:'g'})).filter(o=>liveOk(o,now));redraw();updateLiveChip();},()=>{delete LV.grpUnsub[c];});}
+  const g=S.gps,tw=vis&&LIVE.traffic&&Date.now()<LIVE.until&&g.ok&&!g.sim;
+  const cells=tw?cellsAround(g.lat,g.lon).join(','):'';
+  if(cells!==LV.trfCells){if(LV.trfUnsub){LV.trfUnsub();LV.trfUnsub=null;}LV.trf=[];LV.trfCells=cells;
+    if(cells)trafficFS().then(T=>{if(LV.trfCells!==cells)return;
+      LV.trfUnsub=T.F.onSnapshot(T.F.query(T.F.collection(T.db,'traffic'),T.F.where('c','in',cells.split(','))),snap=>{const now=Date.now();
+        LV.trf=snap.docs.filter(d=>d.id!==T.uid).map(d=>({...d.data(),id:d.id,kind:'t'})).filter(o=>liveOk(o,now));
+        let n=0;for(const d of snap.docs){if(n>=3)break;if(tsMs(d.data().expiresAt)<now-30*60e3&&Math.random()<.3){n++;T.F.deleteDoc(d.ref).catch(()=>{});}}   // tidy up old entries
+        redraw();updateLiveChip();},()=>{LV.trfCells='';});}).catch(()=>{LV.trfCells='';});}
+}
+/* everyone to show: group members by name, other traffic without a name (a group member who also shares traffic shows once) */
+function liveVehicles(){
+  const now=Date.now(),by={};for(const c in LV.grp)for(const o of LV.grp[c]){const p=by[o.id];if(!p||o.at>p.at)by[o.id]=o;}
+  const named=Object.values(by),out=[];
+  for(const o of named){const q=merc(o.lon,o.lat);out.push({...o,x:q[0],y:q[1]});}
+  for(const o of LV.trf){if(now-o.at>3*60e3)continue;const q=merc(o.lon,o.lat);
+    if(out.some(n=>gd(n.x,n.y,q[0],q[1])<90&&(n.hd==null||o.hd==null||Math.abs(angDiff(n.hd,o.hd))<50)))continue;out.push({...o,x:q[0],y:q[1]});}
+  return out;
+}
+function drawOther(x,y,hs,v){
+  const age=Date.now()-v.at,a=age<120e3?1:.45;
+  ctx.save();ctx.translate(x,y);ctx.globalAlpha=a;
+  if(v.kind==='t'){ctx.beginPath();ctx.arc(0,0,15,0,7);ctx.fillStyle='rgba(43,58,74,.16)';ctx.fill();
+    ctx.rotate(hs||0);ctx.beginPath();ctx.moveTo(0,-11);ctx.lineTo(8,8);ctx.lineTo(0,4);ctx.lineTo(-8,8);ctx.closePath();ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=2;ctx.lineJoin='round';ctx.strokeStyle='#2B3A4A';ctx.stroke();ctx.restore();return;}
+  const [,l]=VDIM[v.type]||VDIM.suv,k=S.nav?1.15:.85;
+  ctx.save();ctx.rotate(hs||0);ctx.scale(k,k);paintVehicle(ctx,VDIM[v.type]?v.type:'suv',CARCOL[v.color]?v.color:'White');ctx.restore();
+  const ay=-(l*k/2)-15;ctx.beginPath();ctx.arc(0,ay,12,0,7);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=2.5;ctx.strokeStyle='#7B4FA0';ctx.stroke();
+  ctx.font='15px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(AVATARS.includes(v.emoji)?v.emoji:'🙂',0,ay+1);
+  const t=String(v.name||'Guest').slice(0,16)+(age>=120e3?` · ${Math.round(age/60e3)} min`:'');ctx.font='700 11.5px Barlow,sans-serif';const tw=ctx.measureText(t).width+12,ty=l*k/2+11;
+  ctx.fillStyle='rgba(74,38,96,.92)';ctx.beginPath();ctx.roundRect(-tw/2,ty-8,tw,16,8);ctx.fill();ctx.fillStyle='#fff';ctx.fillText(t,0,ty+.5);
+  ctx.restore();
+}
+function openVehicle(v){
+  const kmh=Math.round((v.sp||0)*3.6),me=myPos(),d=me?gd(me.x,me.y,v.x,v.y):null;
+  const move=kmh>=5?`moving at about ${kmh} km/h`:'standing still';
+  if(v.kind==='t'){openSheet('Another Reba driver',[el('p',{class:'hint',text:`A vehicle ${move}${d!=null?`, ${fmtD(d)} from you`:''}. Updated ${ago(v.at)}.`}),
+    el('p',{class:'fine',text:'Drivers who share traffic are shown without a name, and only while they are moving.'})],{view:'veh'});return;}
+  openSheet(String(v.name||'Guest').slice(0,24),[
+    el('div',{class:'grmem'},el('span',{class:'em',text:AVATARS.includes(v.emoji)?v.emoji:'🙂'}),el('span',null,el('b',{text:v.vehicle||'Vehicle'}),el('small',{text:`${grName(v.code)} · ${move}`}))),
+    el('p',{class:'hint',text:`${whereText(v.x,v.y)}${d!=null?` · ${fmtD(d)} from you`:''}. Updated ${ago(v.at)}.`}),
+    el('button',{class:'primary blue',type:'button',onclick:()=>previewRoute({x:v.x,y:v.y,name:String(v.name||'Guest').slice(0,24)}),text:`Drive to ${String(v.name||'them').slice(0,16)}`}),
+    el('button',{class:'secondary',type:'button',onclick:()=>openGroupChat(v.code),text:`💬 Message in ${grName(v.code)}`})],{view:'veh'});
+}
+/* oncoming vehicles: on my route ahead (when navigating), or straight ahead on the road and heading my way */
+function narrowAt(x,y){const s=snap(x,y,60);if(!s)return false;const w=S.graph.ways[S.graph.segs[s.si][2]];return w.h==='track'||w.h==='path'||!!w.approx||!!w.a;}
+function aheadOnRoute(v){
+  const R=S.route,N=S.nav;let best=null;
+  for(let i=Math.max(1,N.seg-1);i<R.pts.length&&R.cum[i-1]<N.prog+1300;i++){const a=R.pts[i-1],b=R.pts[i],q=projSeg(v.x,v.y,a[0],a[1],b[0],b[1]);if(q.d<40&&(!best||q.d<best.d))best={d:q.d,prog:R.cum[i-1]+q.t*(R.cum[i]-R.cum[i-1]),rb:brg(a[0],a[1],b[0],b[1])};}
+  if(!best)return null;if(best.prog<N.prog+20||Math.abs(angDiff(v.hd,best.rb))<=120)return -1;return best.prog-N.prog;
+}
+/* the roads in front of me, following every branch, up to about 1.3 km */
+function undGraph(){const G=S.graph;if(G.und)return G.und;const u=Array.from({length:G.N},()=>[]);for(const [a,b,,len] of G.segs){u[a].push([b,len]);u[b].push([a,len]);}G.und=u;return u;}
+function roadAhead(x,y,hd,maxD=1300){
+  const G=S.graph,s=snap(x,y,60);if(!s)return null;const und=undGraph(),[a,b]=G.segs[s.si];
+  const fwd=Math.abs(angDiff(hd,brg(G.X[a],G.Y[a],G.X[b],G.Y[b])))<90,start=fwd?b:a,back=fwd?a:b,d0=gd(s.qx,s.qy,G.X[start],G.Y[start]);
+  const out=[{ax:s.qx,ay:s.qy,bx:G.X[start],by:G.Y[start],c:0,len:d0}],dist=new Map([[start,d0]]),prev=new Map([[start,back]]),q=[[d0,start]];
+  while(q.length){q.sort((p,r)=>p[0]-r[0]);const [dd,n]=q.shift();if(dd>dist.get(n))continue;if(dd>maxD)break;
+    for(const [m,len] of und[n]){if(m===prev.get(n))continue;out.push({ax:G.X[n],ay:G.Y[n],bx:G.X[m],by:G.Y[m],c:dd,len});const nd=dd+len;if(nd<(dist.get(m)??1e18)){dist.set(m,nd);prev.set(m,n);q.push([nd,m]);}}}
+  return out;
+}
+function aheadOnRoads(path,v){let best=null;for(const sg of path){const q=projSeg(v.x,v.y,sg.ax,sg.ay,sg.bx,sg.by);if(q.d>=40)continue;const along=sg.c+q.t*sg.len;
+  if(Math.abs(angDiff(v.hd,brg(sg.ax,sg.ay,sg.bx,sg.by)))>120&&(best==null||along<best))best=along;}return best;}
+function checkOncoming(){
+  const g=S.gps,now=Date.now(),mode=S.set.liveWarn||'all';
+  if(mode==='off'||!g.ok||now-g.t>15e3||(g.speed||0)<2||g.heading==null){if(now-LV.lastWarn>8e3)hideTrafWarn();return;}
+  let best=null,path;
+  for(const v of liveVehicles()){if(now-v.at>75e3||v.hd==null||(v.sp||0)<1.5)continue;
+    const d=gd(g.x,g.y,v.x,v.y);if(d>1600)continue;let ahead;
+    if(S.nav&&S.route){ahead=aheadOnRoute(v);if(ahead==null||ahead<0)continue;}
+    else{if(path===undefined)path=roadAhead(g.x,g.y,g.heading);
+      if(path){ahead=aheadOnRoads(path,v);if(ahead==null)continue;}
+      else{const bt=brg(g.x,g.y,v.x,v.y);if(Math.abs(angDiff(g.heading,bt))>35||Math.abs(angDiff(g.heading,v.hd))<135)continue;ahead=d;}}
+    if(ahead<40||ahead>1200)continue;
+    if(mode==='narrow'&&!narrowAt(g.x,g.y)&&!narrowAt(v.x,v.y))continue;
+    if(!best||ahead<best.ahead)best={v,ahead};}
+  if(best)warnOncoming(best.v,best.ahead);else if(now-LV.lastWarn>8e3)hideTrafWarn();
+}
+function warnOncoming(v,ahead){
+  const w=$('trafWarn');LV.twHome=LV.twHome||w.parentElement;const host=S.nav?LV.twHome:$('bottomBar');if(w.parentElement!==host){host.prepend(w);}   // by the thumb when browsing, under the turn arrow when driving
+  const now=Date.now(),who=v.kind==='g'?String(v.name||'Guest').slice(0,16):'Oncoming vehicle';LV.lastWarn=now;
+  w.replaceChildren(el('b',{text:`🚙 ${who} · ${fmtD(Math.round(ahead/10)*10)}`}),el('small',{text:v.kind==='g'?'coming towards you':'coming towards you on this road'}));w.hidden=false;syncBottom();
+  if(!LV.warned[v.id]||now-LV.warned[v.id]>4*60e3){LV.warned[v.id]=now;const m=Math.max(50,Math.round(ahead/50)*50);
+    say(v.kind==='g'?`${who} is coming towards you, about ${m} metres ahead.`:`Oncoming vehicle, about ${m} metres ahead.`);try{navigator.vibrate&&navigator.vibrate([90,60,90]);}catch(e){}}
+}
+function hideTrafWarn(){const w=$('trafWarn');if(w&&!w.hidden){w.hidden=true;syncBottom();}}
+function updateLiveChip(){
+  const c=$('liveChip');if(!c)return;const act=liveActive(),n=liveVehicles().length;
+  if(!act&&!n){if(!c.hidden){c.hidden=true;syncBottom();}return;}
+  const who=[...liveGroups().map(grName),LIVE.traffic?'traffic':''].filter(Boolean).join(' + ');
+  c.textContent=act?(LV.paused?`📡 Paused: ${LV.paused}`:`📡 Sharing with ${who} · until ${hhmm(LIVE.until)}${n?` · ${n} nearby`:''}`):`🚙 ${n} vehicle${n>1?'s':''} on the map`;
+  c.classList.toggle('paused',act&&!!LV.paused);c.hidden=false;syncBottom();
+}
+function syncBottom(){const b=$('bottomBar');if(b)document.documentElement.style.setProperty('--bbh',b.offsetHeight+'px');}
+function liveTick(){
+  if(LIVE.until&&Date.now()>=LIVE.until&&(LIVE.traffic||Object.keys(LIVE.groups).length)){liveStopAll(true);toast('Live sharing stopped for today.');}
+  try{liveListen();livePublish();checkOncoming();}catch(e){console.warn('live',e);}
+  updateLiveChip();
+}
+function openLive(){
+  const act=liveActive(),why=act?livePause():'';
+  const tg=(on,label,sub,fn)=>{const i=el('input',{type:'checkbox'});i.checked=!!on;i.onchange=()=>fn(i.checked);return el('label',{class:'toggle'},el('span',null,label,sub?el('small',{class:'tsub',text:sub}):null),i);};
+  const warn=S.set.liveWarn||'all';
+  const nodes=[el('div',{class:'offstate '+(act?(why?'off':'on'):'mode')},el('b',{text:act?(why?`Paused: ${why}`:`📡 Sharing until ${hhmm(LIVE.until)}`):'Live sharing is off'}),
+      el('small',{text:act?'Only while Reba is open on screen. It stops by itself at the time shown.':'Choose what to share. It switches itself off in the evening, and pauses outside the park.'})),
+    el('p',{class:'lbl',text:'Oncoming traffic'}),
+    tg(LIVE.traffic&&act,'Share anonymously and warn me about oncoming vehicles','Other Reba drivers see a vehicle without your name, only while you are moving. You see theirs the same way.',on=>liveSet('traffic',null,on)),
+    el('p',{class:'fine',text:'Warn me on'}),
+    el('div',{class:'seg'},...[['all','All roads'],['narrow','Narrow tracks only'],['off','Never']].map(([k,l])=>el('button',{type:'button',class:warn===k?'on':'',onclick:()=>{S.set.liveWarn=k;saveSet();openLive();},text:l}))),
+    el('p',{class:'lbl',text:'Your groups'})];
+  if(GR.codes.length)for(const g of GR.codes){const n=(LV.grp[g.code]||[]).length;nodes.push(tg(LIVE.groups[g.code]&&act,`Share with ${g.name}`,`Members see your vehicle and name on the map. ${n?`${n} member${n>1?'s':''} sharing now.`:'Nobody else is sharing right now.'}`,on=>liveSet('group',g.code,on)));}
+  else nodes.push(el('p',{class:'hint',text:'Create a group to see your family or friends on the map.'}),el('button',{class:'secondary',type:'button',onclick:openNewGroup,text:'＋ New group'}));
+  if(!S.gps.ok)nodes.push(el('p',{class:'hint',text:'Turn on location for Reba so it can share your position.'}));
+  nodes.push(el('p',{class:'fine',text:'Positions are kept for a few minutes only, with no history. Sharing stops by itself at 19:00 (or 2 hours after you turn it on in the evening), and pauses outside the park and when Reba is not open on screen. Traffic uses a separate anonymous identity that changes every day.'}));
+  if(act)nodes.push(el('button',{class:'secondary no',type:'button',onclick:()=>liveStopAll(),text:'Stop all sharing'}));
+  openSheet('Live positions',nodes,{view:'live'});
+}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)liveDropTraffic();liveTick();});
+setInterval(liveTick,5000);
 
 /* ---------- trip mode: a panel at the bottom; tap anything on the map to add it ---------- */
 function enterPlanMode(hint){
@@ -2529,11 +2720,11 @@ function saveSet(){LS.set('settings',S.set);}
 const LAYERS=[
   ['animals','🦁','Animal sightings'],['road','⚠️','Road reports'],['junctions','⑦','Junction stones'],
   ['stay','🏕️','Lodges, camps, picnic spots, lookouts'],['park','⛩️','Gates, ranger posts, offices, ruins'],
-  ['names','🔤','Lake and area names'],['closed','➖','Closed and uncertain tracks'],['water','🌿','Rivers and wetlands'],['examples','🧪','Example reports'],['official','🗺️','Official park map on top']];
+  ['names','🔤','Lake and area names'],['closed','➖','Closed and uncertain tracks'],['water','🌿','Rivers and wetlands'],['vehicles','🚙','Other drivers (live)'],['examples','🧪','Example reports'],['official','🗺️','Official park map on top']];
 const LAYER_PRESETS={
-  all:{animals:1,road:1,junctions:1,stay:1,park:1,names:1,closed:1,water:1,examples:1,official:0},
-  clean:{animals:1,road:1,junctions:1,stay:0,park:0,names:0,closed:0,water:0,examples:0},
-  animals:{animals:1,road:0,junctions:0,stay:0,park:0,names:0,closed:0,water:0,examples:1}};
+  all:{animals:1,road:1,junctions:1,stay:1,park:1,names:1,closed:1,water:1,examples:1,vehicles:1,official:0},
+  clean:{animals:1,road:1,junctions:1,stay:0,park:0,names:0,closed:0,water:0,examples:0,vehicles:1},
+  animals:{animals:1,road:0,junctions:0,stay:0,park:0,names:0,closed:0,water:0,examples:1,vehicles:0}};
 function LY(k){if(k==='examples')return !S.set.hideEx;const l=S.set.layers||{};if(k==='official')return !!l.official;return l[k]!==0&&l[k]!==false;}
 function setLayer(k,on){if(k==='examples'){S.set.hideEx=!on;}else{S.set.layers=Object.assign({},S.set.layers,{[k]:on?1:0});}saveSet();updateLayersBtn();redraw();if(k==='official'&&sheetView==='layers')openLayers();}
 /* ---------- the park's official map (A3, 2020): tiles fitted to the live map, and a full-page viewer ---------- */
@@ -2664,7 +2855,7 @@ function coffeeLink(cls){return el('a',{class:'coffee'+(cls?' '+cls:''),href:COF
 function openSettings(){
   const tog=(key,label)=>{const i=el('input',{type:'checkbox',id:'set-'+key});i.checked=!!S.set[key];i.onchange=()=>{S.set[key]=i.checked;saveSet();if(key==='sat')setSat(i.checked);if(key==='nearAlert')checkNear(true);if(key==='closedOk'){buildGraph();toast(i.checked?'Routes may now use tracks marked closed. Check with a ranger first.':'Routes avoid tracks marked closed again.');}if(key==='officialOk'){buildGraph();toast(i.checked?'Routes use tracks on the official park map again.':'Routes avoid tracks that OpenStreetMap marks closed.');}redraw();};return el('label',{class:'toggle',for:'set-'+key},label,i);};
   const cfg=window.AKAGERA_FIREBASE;
-  const nodes=[el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help'}),el('button',{class:'secondary',type:'button',onclick:openMyCar,text:'🚙 My vehicle and avatar'}),el('button',{class:'secondary',type:'button',onclick:openOffline,text:S.set.offline?'📴 Offline mode is on · downloads':'📶 Offline use and downloads'}),tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('car3d','3D vehicle while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('nearAlert','Alert me near other drivers\' sightings'),tog('wxAlerts','Warn me about storms and heavy rain'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),tog('officialOk','Use tracks the official park map shows, even if OpenStreetMap marks them closed (amber dashed)'),tog('closedOk','Allow routes on all tracks marked closed (red dashed)'),
+  const nodes=[el('button',{class:'secondary sosbtn',type:'button',onclick:()=>openEmergency(),text:'🆘 Emergency help'}),el('button',{class:'secondary',type:'button',onclick:openMyCar,text:'🚙 My vehicle and avatar'}),el('button',{class:'secondary',type:'button',onclick:openOffline,text:S.set.offline?'📴 Offline mode is on · downloads':'📶 Offline use and downloads'}),el('button',{class:'secondary',type:'button',onclick:openLive,text:liveActive()?`📡 Live positions · on until ${hhmm(LIVE.until)}`:'📡 Live positions and traffic'}),tog('voice','Spoken directions'),tog('tilt','3D view while driving'),tog('car3d','3D vehicle while driving'),tog('speedWarn','Warn me above 40 km/h in the park'),tog('nearAlert','Alert me near other drivers\' sightings'),tog('wxAlerts','Warn me about storms and heavy rain'),tog('wake','Keep screen on while driving'),tog('sat','Satellite background'),tog('officialOk','Use tracks the official park map shows, even if OpenStreetMap marks them closed (amber dashed)'),tog('closedOk','Allow routes on all tracks marked closed (red dashed)'),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();if(S.sim){stopSim();toast('Demo drive stopped.');}else{if(!S.route){toast('Pick a destination with Go first.');return;}startNav();startSim();}},text:S.sim?'Stop demo drive':'Demo drive along the planned route'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{closeSheet();startPick('me');},text:'Set my position by hand'}),
     el('button',{class:'secondary',type:'button',onclick:()=>{S.set.hideEx=!S.set.hideEx;saveSet();closeSheet();redraw();},text:S.set.hideEx?'Show example reports':'Hide example reports'}),
@@ -2701,6 +2892,6 @@ async function boot(){
   setInterval(()=>{if(!S.nav&&S.follow){const p=myPos();if(p&&p.gps){cam.cx=p.x;cam.cy=p.y;redraw();}}},1000);
   if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))navigator.serviceWorker.register('sw.js').catch(()=>{});
   if(!S.set.hideEx&&allReports().some(r=>r.example))banner('No live reports yet. Pins marked EXAMPLE are samples.','Hide',()=>{S.set.hideEx=true;saveSet();hideBanner();redraw();},'ex');
-  window.AKL=S;window.AKLf={startSim,stopSim,w2s:(x,y)=>w2s(x,y),getHits:()=>hits,draw3D,clear3D,tiltProjector,car3dParts,enterPlanMode,exitPlanMode,showPlanPop,GR,grCreate,grJoin,openGroups,openGroupChat,openInvite,openChats,openPlanner,addPlanStop,planOptimize,getPlan:()=>PLAN,PL,openOffline,downloadOffline,setOfflineMode,openWeather,loadWeather,wxHere,openParkMap,drawOfficial,paintVehicle,paintAvatar,carSet,openMyCar,saveCar,lbPublish,myStats,lbSorted,LB,previewRoute,centerOn,route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
+  window.AKL=S;window.AKLf={fix:c=>onFix(c,false),unmerc,brg,openLive,liveSet,liveStopAll,liveVehicles,liveTick,checkOncoming,LIVE,LV,startNav,startSim,stopSim,w2s:(x,y)=>w2s(x,y),getHits:()=>hits,draw3D,clear3D,tiltProjector,car3dParts,enterPlanMode,exitPlanMode,showPlanPop,GR,grCreate,grJoin,openGroups,openGroupChat,openInvite,openChats,openPlanner,addPlanStop,planOptimize,getPlan:()=>PLAN,PL,openOffline,downloadOffline,setOfflineMode,openWeather,loadWeather,wxHere,openParkMap,drawOfficial,paintVehicle,paintAvatar,carSet,openMyCar,saveCar,lbPublish,myStats,lbSorted,LB,previewRoute,centerOn,route,snap,merc,penalties,roadLife,openWeather,updateWxPill,janitor,socTick,retire,openEmergency,warnDrivers,checkSOS};   // for debugging
 }
 boot();

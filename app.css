@@ -466,3 +466,17 @@ a.secondary{display:flex;align-items:center;justify-content:center;text-decorati
 @keyframes splashOut{to{opacity:0;visibility:hidden}}
 @keyframes splashPop{from{transform:translateY(10px) scale(.9);opacity:0}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){#splash,#splash svg{animation-duration:.01s}#splash{animation-delay:.9s}}
+
+/* ---- live positions ---- */
+.livechip{align-self:flex-start;pointer-events:auto;border:0;background:#4A2660;color:#fff;border-radius:999px;padding:7px 12px;font:600 13.5px var(--f-body);box-shadow:0 2px 8px rgba(0,0,0,.18);max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}
+.livechip.paused{background:#fff;color:#4A2660;border:1px solid #CDB8DD}
+.trafwarn{position:absolute;left:50%;transform:translateX(-50%);top:62px;z-index:6;background:#C0392B;color:#fff;border-radius:14px;padding:9px 16px;box-shadow:0 6px 18px rgba(0,0,0,.25);text-align:center;max-width:86%;animation:twIn .25s ease}
+.trafwarn b{display:block;font-family:var(--f-display);font-size:21px;letter-spacing:.01em}.trafwarn small{display:block;font-size:13px;opacity:.92}
+.navmode .trafwarn{top:calc(112px + env(safe-area-inset-top));left:10px;transform:none;max-width:62%;text-align:left}
+@keyframes twIn{from{opacity:0;transform:translate(-50%,-8px)}to{opacity:1}}
+.navmode .trafwarn{animation:none}
+.toggle .tsub{display:block;font-size:13px;color:var(--muted);font-weight:400;margin-top:3px;line-height:1.35}
+
+.speed{bottom:calc(var(--bbh,132px) + 18px + env(safe-area-inset-bottom))}
+.navmode .speed{bottom:calc(98px + env(safe-area-inset-bottom))}
+.bottom .trafwarn{position:static;transform:none;align-self:stretch;text-align:left;max-width:none;animation:none;padding:9px 14px}
