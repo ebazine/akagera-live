@@ -11,7 +11,7 @@ Open it on a phone at **https://ebazine.github.io/akagera-live/** and use *Add t
 - **Route preview.** Step through every turn on the map before you drive, or press play for a guided fly-through.
 - **Find animals.** Tick the animals you want to see; they are added to your trip as animal stops, which always use the freshest sighting of each species (and update when someone reports a newer one). Mix them freely with lodges, lakes and junction stones.
 - **Speed warning.** Above 40 km/h inside the park the speed badge turns red, you get a spoken reminder (can be switched off in Settings).
-- **Report in three or four taps.** Animals: species, how many, which way they are moving (relative to your car). Road problems: type and severity. Your GPS position is used automatically.
+- **Report with one tap.** Report → tap the animal, and it is sent with your GPS position. A small card then lets you add, if you like, how many, which way they are moving (relative to your car), which rhino, and more details (what they are doing, distance, a note). If the same animal was reported within 300 m in the last 30 minutes, your tap confirms that sighting instead of adding a second one. Road problems: type and severity.
 - **Timestamps everywhere.** Every sighting shows the clock time it was seen and how long ago. *Animals* lists the latest sightings and the last time each species was seen (up to 7 days).
 - **Road reports expire with the weather.** Mud, flooding and slippery climbs last a base time plus extra hours per millimetre of rain (Open-Meteo data for the north, centre and south of the park), and longer if it rains again. Other problems have fixed lifetimes (fallen tree 3 days, closure 7 days, potholes 14 days, stuck vehicle 6 h, animals on the road 1 h). Anyone can mark a report *still there* or *gone*.
 - **Verify sightings on the spot.** Within 400 m of another driver's sighting, with a live GPS fix (accurate to 100 m or better), you can tap *I see it*. The sighting gets a green tick, its time is refreshed, the verifier's name and vehicle (from the trip pass) and distance are shown, the animal is ticked on your list and you earn 5 points. *Not there any more* also needs you to be near (the reporter can always remove their own). The app alerts you, by voice and vibration, when you come within 400 m of a sighting, with *I see it* / *Not here* buttons. This works while the app is open on screen (a web app cannot alert in the background). Turn it off in Settings.
@@ -70,9 +70,18 @@ service cloud.firestore {
         && request.resource.data.at is number
         && request.resource.data.note is string && request.resource.data.note.size() <= 200
         && (!('uid' in request.resource.data) || (signedIn() && request.resource.data.uid == request.auth.uid));
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes','lastSeen','note','act','rdist','ver'])
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes','lastSeen','note','act','rdist','ver','count','heading','type'])
         && request.resource.data.note is string && request.resource.data.note.size() <= 200
-        && (!('ver' in request.resource.data) || (request.resource.data.ver is map && request.resource.data.ver.size() <= 100));
+        && (!('ver' in request.resource.data) || (request.resource.data.ver is map && request.resource.data.ver.size() <= 100))
+        // how many, which way and which rhino can be added while the sighting is fresh (30 minutes after it was last seen)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['count','heading','type'])
+            || (resource.data.kind == 'animal' && request.time.toMillis() < resource.data.lastSeen + 1800000))
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['type'])
+            || (resource.data.type == 'rhino' && request.resource.data.type in ['rhino_b','rhino_w']))
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['count'])
+            || request.resource.data.count in ['1','2–5','6–20','20+'])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['heading'])
+            || (request.resource.data.heading is int && request.resource.data.heading >= -1 && request.resource.data.heading <= 7));
       allow delete: if false;
     }
 

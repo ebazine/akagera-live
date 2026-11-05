@@ -1004,7 +1004,7 @@ function onTap(x,y){
    10. Sheets and flows
    ========================================================================= */
 let backFn=null,sheetView=null,pendingAfterPos=null;
-function openSheet(title,nodes,o={}){const nc=$('nearCard');if(nc)nc.hidden=true;$('sheet').classList.toggle('tall',!!o.tall);if(!o.view||!(o.view.startsWith('chat:')||o.view.startsWith('thread:')))SOC.render=null;$('sheetTitle').textContent=title;$('sheetBody').replaceChildren(...nodes.filter(Boolean));$('sheet').hidden=false;sheetView=o.view||null;backFn=o.back||null;$('sheetBack').hidden=!o.back;
+function openSheet(title,nodes,o={}){if(QD)closeQuick();const nc=$('nearCard');if(nc)nc.hidden=true;$('sheet').classList.toggle('tall',!!o.tall);if(!o.view||!(o.view.startsWith('chat:')||o.view.startsWith('thread:')))SOC.render=null;$('sheetTitle').textContent=title;$('sheetBody').replaceChildren(...nodes.filter(Boolean));$('sheet').hidden=false;sheetView=o.view||null;backFn=o.back||null;$('sheetBack').hidden=!o.back;
   const dots=$('sheetDots');dots.replaceChildren();if(o.step){for(let i=1;i<=o.step[1];i++)dots.append(el('i',{class:i<=o.step[0]?'on':''}));}$('sheetBody').scrollTop=0;}
 function closeSheet(){$('sheet').hidden=true;sheetView=null;selected=null;redraw();setTimeout(()=>checkNear(true),50);if(S.planMode)setTimeout(renderDock,0);}
 $('sheetClose').onclick=closeSheet;$('sheetBack').onclick=()=>backFn&&backFn();
@@ -1037,36 +1037,57 @@ function startReport(preset){
   const out=outsideBy(p);
   if(out>3000){pendingAfterPos=()=>startReport(preset);openSheet('You are outside the park',[el('p',{class:'hint',text:`Your position is ${fmtD(out)} outside the park, so a report would put the animal in the wrong place. Set where you are in the park first.`}),el('button',{class:'primary',type:'button',onclick:()=>startPick('me'),text:'Tap my spot on the map'}),el('button',{class:'secondary',type:'button',onclick:openSetPos,text:'Pick a junction stone'})],{view:'outside'});return;}
   const h=p.gps&&S.gps.heading!=null&&(S.gps.speed>1||Date.now()-S.gps.t<30e3)?S.gps.heading:null;
-  D={lat:p.lat,lon:p.lon,car:h};
-  if(preset){D.kind='animal';D.type=preset;stepCount();return;}
-  openSheet('What did you see?',[el('div',{class:'huge'},
-      el('button',{type:'button',onclick:()=>{D.kind='animal';stepSpecies();}},el('span',{text:'🦁'}),'Animals'),
-      el('button',{type:'button',onclick:()=>{D.kind='road';stepRoadType();}},el('span',{text:'🚧'}),'Road problem')),
-    el('p',{class:'fine',text:`Uses your position: ${whereText(p.x,p.y)}${p.gps?'':' (set by hand)'}.`})],{step:[1,4],view:'r1'});
+  D={lat:p.lat,lon:p.lon,car:h,x:p.x,y:p.y};
+  if(preset){quickReport(preset);return;}
+  const btns=TOP_ANIMALS.map(id=>ANIMALS.find(a=>a[0]===id)).filter(Boolean).map(a=>el('button',{type:'button',onclick:()=>quickReport(a[0])},pic(a[0],52),a[1]));
+  btns.push(el('button',{type:'button',class:'more',onclick:()=>stepSpecies(true)},el('span',{text:'＋'}),'More animals'));
+  openSheet('What did you see?',[el('p',{class:'hint',text:'Tap the animal and it is sent. You can add how many and which way they are going afterwards.'}),
+    el('div',{class:'grid3'},...btns),
+    el('button',{class:'secondary roadbtn',type:'button',onclick:()=>{D.kind='road';stepRoadType();}},'🚧 Report a road problem'),
+    el('p',{class:'fine',text:`Uses your position: ${whereText(p.x,p.y)}${p.gps?'':' (set by hand)'}.`})],{view:'r1'});
 }
-function stepSpecies(all){
-  const list=all?ANIMALS.filter(a=>a[0]!=='rhino'):TOP_ANIMALS.map(id=>ANIMALS.find(a=>a[0]===id));
-  const btns=list.map(a=>el('button',{type:'button',onclick:()=>{D.type=a[0];a[0]==='rhino'?stepRhino():stepCount();}},pic(a[0],52),a[1]));
-  if(!all)btns.push(el('button',{type:'button',class:'more',onclick:()=>stepSpecies(true)},el('span',{text:'＋'}),'More animals'));
-  openSheet(all?'All animals':'Which animal?',[el('div',{class:'grid3'},...btns)],{step:[2,4],back:all?()=>stepSpecies():startReport,view:'r2'});
+function stepSpecies(){
+  const list=ANIMALS.filter(a=>a[0]!=='rhino');
+  openSheet('All animals',[el('div',{class:'grid3'},...list.map(a=>el('button',{type:'button',onclick:()=>quickReport(a[0])},pic(a[0],52),a[1])))],{back:()=>startReport(),view:'r2'});
 }
-function stepRhino(){
-  openSheet('Which rhino?',[el('div',{class:'stack'},
-    ...[['rhino_b','Black rhino','Hooked lip, browses in bush'],['rhino_w','White rhino','Wide square lip, grazes in the open'],['rhino','Not sure','']].map(([id,t,sub])=>el('button',{class:'choice',type:'button',onclick:()=>{D.type=id;stepCount();}},pic(id==='rhino'?'rhino':id,54),el('span',null,t,sub?el('small',{text:sub}):null))))],{step:[2,4],back:()=>stepSpecies(),view:'rhino'});
+/* ---------- one tap sends the sighting; a small card then offers how many, which way, and more ---------- */
+let QD=null,QDt=null;
+function recentSame(type,x,y){
+  const now=Date.now();let best=null;
+  for(const r of allReports()){if(r.kind!=='animal'||r.example||now-r.lastSeen>30*60e3)continue;
+    if(r.type!==type&&!(type.startsWith('rhino')&&r.type.startsWith('rhino')&&(type==='rhino'||r.type==='rhino')))continue;
+    const v=Object.values(r.votes||{});if(v.filter(n=>n<0).length>v.filter(n=>n>0).length)continue;
+    const q=merc(r.lon,r.lat),d=gd(x,y,q[0],q[1]);if(d<300&&(!best||d<best.d))best={r,d};}
+  return best;
 }
-function stepCount(){
-  openSheet(`How many ${(PLURAL[D.type]||(SHORTNAME[D.type]||SPX[D.type].name)+'s').toLowerCase()}?`,[el('div',{class:'stack'},...COUNTS.map(c=>el('button',{class:'choice',type:'button',onclick:()=>{D.count=c;stepMove();}},el('span',{class:'n',text:c}),c==='1'?'Just one':c==='20+'?'A big herd':'A group')))],{step:[3,4],back:()=>D.type.startsWith('rhino')?stepRhino():stepSpecies(),view:'r3'});
+function quickReport(type){
+  const m=recentSame(type,D.x,D.y);
+  if(m){patchReport(m.r,{votes:{[S.device]:1},lastSeen:Date.now()},{quiet:true});
+    const fresh=tick(m.r.type,'report');if(fresh)setTimeout(()=>toast(`New on your list: ${SPX[m.r.type].name} +${fresh} points`,'My list',()=>openFind('list'),6000),2600);
+    QD={id:m.r.id,rec:m.r,merged:true,since:m.r.at,dist:m.d,mine:m.r.by===S.device};}
+  else{D.kind='animal';D.type=type;delete D.count;delete D.heading;const rec=sendReport(true);QD={id:rec.id,rec,merged:false};}
+  QD.car=D.car;QD.saved=false;closeSheet();openQuick();try{navigator.vibrate&&navigator.vibrate(30);}catch(e){}
 }
-function stepMove(){
-  // relative to the car when we know which way the car is pointing, otherwise compass
-  const rel=D.car!=null;
-  const cells=[7,0,1,6,-1,2,5,4,3];
-  const relLbl={0:'Ahead',1:'Ahead right',2:'Right',3:'Behind right',4:'Behind',5:'Behind left',6:'Left',7:'Ahead left'};
-  const arrows=['↑','↗','→','↘','↓','↙','←','↖'];
-  const pad=el('div',{class:'pad'},...cells.map(c=>{
-    if(c===-1)return el('button',{type:'button',class:'car',onclick:()=>{D.heading=-1;sendReport();}},el('span',{text:'🛑'}),'Not moving');
-    return el('button',{type:'button','aria-label':rel?relLbl[c]:DIRNAME[c],onclick:()=>{D.heading=rel?Math.round(((D.car+c*45)%360)/45)%8:c;sendReport();}},arrows[c],el('small',{text:rel?relLbl[c]:DIRS[c]}));}));
-  openSheet('Which way are they moving?',[el('p',{class:'hint',text:rel?'Arrows are relative to your car. Up means the way you are driving.':'Arrows point to the compass. Up is north.'}),pad],{step:[4,4],back:stepCount,view:'r4'});
+function closeQuick(){QD=null;clearTimeout(QDt);const c=$('quickCard');if(c)c.hidden=true;}
+function openQuick(){
+  const c=$('quickCard');if(!QD){c.hidden=true;return;}
+  const r=allReports().find(x=>x.id===QD.id)||QD.rec;if(!r){c.hidden=true;return;}   // the database may not have echoed a brand-new report yet
+  clearTimeout(QDt);QDt=setTimeout(closeQuick,25e3);   // goes away by itself if you just drive on
+  const set=patch=>{patchReport(r,patch,{quiet:true});QD.saved=true;openQuick();};
+  const type=QD.type||r.type,name=AN[type]?AN[type][1]:'Animal';
+  const title=QD.merged?(QD.mine?`${name}: updated`:`${name}: confirmed`):`${name} reported`;
+  const sub=QD.saved?'Saved. Add more or press Done.':QD.merged?(QD.mine?'You reported it here already, so it is marked as seen again.':`Already reported ${ago(QD.since)}, ${fmtD(QD.dist)} from here. Marked as still there.`):'Sent. Add details if you like.';
+  const nodes=[el('div',{class:'qhead'},pic(type,40),el('div',null,el('b',{text:title}),el('small',{text:sub})),el('button',{class:'qdone',type:'button',onclick:closeQuick,text:'Done'}))];
+  if(type.startsWith('rhino'))nodes.push(el('div',{class:'qrhino'},...[['rhino_b','Black rhino'],['rhino_w','White rhino']].map(([id,t])=>el('button',{type:'button',class:type===id?'on':'',onclick:()=>{if(type===id)return;QD.type=id;tick(id,'report');set({type:id});},text:t}))));
+  const cnt=QD.count||r.count;
+  const count=el('div',null,el('p',{class:'qlbl',text:'How many?'}),el('div',{class:'qcount'},...COUNTS.map(v=>el('button',{type:'button',class:cnt===v?'on':'',onclick:()=>{QD.count=v;set({count:v});},text:v}))));
+  const rel=QD.car!=null,arrows=['↑','↗','→','↘','↓','↙','←','↖'].map(a=>a+'\uFE0E'),relLbl={0:'Ahead',1:'Ahead right',2:'Right',3:'Behind right',4:'Behind',5:'Behind left',6:'Left',7:'Ahead left'};
+  const pad=el('div',{class:'qpad'},...[7,0,1,6,-1,2,5,4,3].map(k=>k===-1
+    ?el('button',{type:'button',class:'still'+(QD.cell===-1?' on':''),'aria-label':'Not moving',onclick:()=>{QD.cell=-1;set({heading:-1});},text:'🛑'})
+    :el('button',{type:'button',class:QD.cell===k?'on':'','aria-label':rel?relLbl[k]:DIRNAME[k],onclick:()=>{QD.cell=k;set({heading:rel?Math.round(((QD.car+k*45)%360)/45)%8:k});},text:arrows[k]})));
+  nodes.push(el('div',{class:'qbody'},count,el('div',null,el('p',{class:'qlbl',text:'Moving?'}),pad,el('p',{class:'qhint',text:rel?'Up = the way you drive':'Up = north'}))),
+    el('button',{class:'qmore',type:'button',onclick:()=>{const id=QD.id;closeQuick();openDetails(id);},text:'＋ What they are doing, distance, note'}));
+  c.replaceChildren(...nodes);c.hidden=false;
 }
 function stepRoadType(){
   openSheet('What is the problem?',[el('div',{class:'grid3'},...ROADS.filter(a=>a[0]!=='sos').map(a=>el('button',{type:'button',onclick:()=>{D.type=a[0];stepSev();}},el('span',{text:a[2]}),a[1])))],{step:[2,3],back:startReport,view:'r2'});
@@ -1074,17 +1095,18 @@ function stepRoadType(){
 function stepSev(){
   openSheet('How bad is it?',[el('div',{class:'stack'},...SEV.map(s=>el('button',{class:'choice sev'+s[0],type:'button',onclick:()=>{D.sev=s[0];sendReport();}},el('span',null,s[1],el('small',{text:s[2]})))))],{step:[3,3],back:stepRoadType,view:'r3'});
 }
-function sendReport(){
+function sendReport(quiet){
   const now=Date.now();
   const rec={id:'r'+now.toString(36)+Math.random().toString(36).slice(2,6),kind:D.kind,type:D.type,lat:+D.lat.toFixed(6),lon:+D.lon.toFixed(6),at:now,lastSeen:now,by:S.device,votes:{},note:''};
-  if(D.kind==='animal'){rec.count=D.count||'1';rec.heading=D.heading??-1;}else rec.sev=D.sev||'1';
+  if(D.kind==='animal'){if(D.count)rec.count=D.count;if(D.heading!=null)rec.heading=D.heading;}else rec.sev=D.sev||'1';
   if(passValid()&&S.fs&&S.fs.uid&&LS.get('showName',true))rec.uid=S.fs.uid;
   saveReport(rec);closeSheet();
   const fresh=D.kind==='animal'?tick(rec.type,'report'):null;
   const what=D.kind==='animal'?`${label(clean(rec.id,rec))}${rec.heading>=0?`, heading ${DIRNAME[rec.heading]}`:''}`:`${RD[rec.type][1]} (${SEV.find(s=>s[0]===rec.sev)[1]})`;
   if(fresh)setTimeout(()=>toast(`New on your list: ${SPX[rec.type].name} +${fresh} points`,'My list',()=>openFind('list'),6000),2600);
   const needHelp=D.kind==='road'&&['stuck','broken'].includes(D.type),ty=D.type;
-  toast(`Sent: ${what}.`,needHelp?'Emergency help':'Add details',needHelp?()=>openEmergency(ty):()=>openDetails(rec.id),needHelp?9000:2500);
+  if(!quiet)toast(`Sent: ${what}.`,needHelp?'Emergency help':'Add details',needHelp?()=>openEmergency(ty):()=>openDetails(rec.id),needHelp?9000:2500);
+  return rec;
 }
 function openDetails(id){
   const r=allReports().find(x=>x.id===id);if(!r)return;const patch={};

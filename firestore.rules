@@ -19,9 +19,18 @@ service cloud.firestore {
         && request.resource.data.at is number
         && request.resource.data.note is string && request.resource.data.note.size() <= 200
         && (!('uid' in request.resource.data) || (signedIn() && request.resource.data.uid == request.auth.uid));
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes','lastSeen','note','act','rdist','ver'])
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes','lastSeen','note','act','rdist','ver','count','heading','type'])
         && request.resource.data.note is string && request.resource.data.note.size() <= 200
-        && (!('ver' in request.resource.data) || (request.resource.data.ver is map && request.resource.data.ver.size() <= 100));
+        && (!('ver' in request.resource.data) || (request.resource.data.ver is map && request.resource.data.ver.size() <= 100))
+        // how many, which way and which rhino can be added while the sighting is fresh (30 minutes after it was last seen)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['count','heading','type'])
+            || (resource.data.kind == 'animal' && request.time.toMillis() < resource.data.lastSeen + 1800000))
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['type'])
+            || (resource.data.type == 'rhino' && request.resource.data.type in ['rhino_b','rhino_w']))
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['count'])
+            || request.resource.data.count in ['1','2–5','6–20','20+'])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['heading'])
+            || (request.resource.data.heading is int && request.resource.data.heading >= -1 && request.resource.data.heading <= 7));
       allow delete: if false;
     }
 
